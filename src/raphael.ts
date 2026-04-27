@@ -87,11 +87,15 @@ export function switched(name: string): string {
 }
 
 export function noActive(): string {
-  return `${tag.warn}無 active 個體。/new ${code("<name>")} 創設新個體，或 /list 查看停泊中的個體並 /resume ${code("<sid8>")} 喚回。`;
+  return `${tag.warn}無 active 個體。/new ${code("&lt;name&gt;")} 創設新個體，或 /list 查看停泊中的個體並 /resume ${code("&lt;sid8&gt;")} 喚回。`;
 }
 
 export function notFound(sid8: string): string {
   return `${tag.warn}個體 ${code(sid8)} 不存在。`;
+}
+
+export function ambiguous(prefix: string, count: number): string {
+  return `${tag.warn}前綴 ${code(prefix)} 對應到 ${count} 個個體，請給更精確的 sid8。`;
 }
 
 export function denied(): string {
@@ -142,8 +146,7 @@ export function help(): string {
     `${code("/new <name> [--in <path>] [--desc <text>]")}`,
     `             創設新個體；--in 指定既存目錄當工作領域；--desc 注入角色描述`,
     `${code("/list")}      所有個體（▶ = active）`,
-    `${code("/use <sid8>")}     切換 active`,
-    `${code("/resume [sid8]")}  喚回；無參數會跳出選單`,
+    `${code("/resume [sid8]")}  喚回／切換；無參數會跳出選單`,
     `${code("/clear")}     停泊當前個體（不刪）`,
     `${code("/delete [sid8]")}  徹底抹消；無參數會跳出選單`,
     `${code("/cancel")}    中斷進行中的演算`,

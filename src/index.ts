@@ -2,17 +2,12 @@ import { Bot, Context, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "./config.js";
-import {
-  runClaude,
-  probeInit,
-  probeUsage,
-  type ClaudeEvent,
-} from "./claude.js";
+import { probeInit, probeUsage } from "./claude.js";
 import * as ses from "./session.js";
 import * as r from "./raphael.js";
+import { runTurn } from "./runner.js";
 
 const BOOT_AT = Date.now();
-const TURN_TIMEOUT_MS = 10 * 60_000;
 
 const bot = new Bot(config.botToken);
 await ses.loadAll();
@@ -36,6 +31,8 @@ async function reply(ctx: Context, text: string): Promise<void> {
     }
   }
 }
+
+const replyTo = (ctx: Context) => (text: string) => reply(ctx, text);
 
 interface NewArgs {
   name: string;
@@ -125,32 +122,17 @@ bot.command("list", async (ctx) => {
   );
 });
 
-bot.command("use", async (ctx) => {
-  const arg = ctx.match?.trim();
-  const uid = ctx.from!.id;
-  if (arg) {
-    const s = ses.switchTo(uid, arg);
-    return reply(ctx, s ? r.switched(s.name) : r.notFound(arg));
-  }
-  const all = ses.listSessions(uid);
-  const active = ses.activeSession(uid);
-  const picks = all
-    .filter((s) => s.id !== active?.id)
-    .map((s) => ({ name: s.name, sid8: ses.sid8(s.id) }));
-  if (picks.length === 0) return reply(ctx, r.pickerEmpty("resume"));
-  await ctx.reply(r.pickerPrompt("resume"), {
-    parse_mode: "HTML",
-    reply_markup: buildPicker("resume", picks),
-  });
-});
+async function handleSwitch(ctx: Context, arg: string): Promise<void> {
+  const result = ses.switchTo(ctx.from!.id, arg);
+  if (result.kind === "found") return reply(ctx, r.switched(result.session.name));
+  if (result.kind === "ambiguous") return reply(ctx, r.ambiguous(arg, result.count));
+  return reply(ctx, r.notFound(arg));
+}
 
 bot.command("resume", async (ctx) => {
   const arg = ctx.match?.trim();
   const uid = ctx.from!.id;
-  if (arg) {
-    const s = ses.switchTo(uid, arg);
-    return reply(ctx, s ? r.switched(s.name) : r.notFound(arg));
-  }
+  if (arg) return handleSwitch(ctx, arg);
   const all = ses.listSessions(uid);
   const active = ses.activeSession(uid);
   const picks = all
@@ -167,13 +149,15 @@ bot.command("delete", async (ctx) => {
   const arg = ctx.match?.trim();
   const uid = ctx.from!.id;
   if (arg) {
-    const removed = ses.deleteSession(uid, arg);
-    return reply(
-      ctx,
-      removed
-        ? r.deletedSession(removed.name, ses.sid8(removed.id))
-        : r.notFound(arg),
-    );
+    const result = ses.deleteByPrefix(uid, arg);
+    if (result.kind === "found")
+      return reply(
+        ctx,
+        r.deletedSession(result.session.name, ses.sid8(result.session.id)),
+      );
+    if (result.kind === "ambiguous")
+      return reply(ctx, r.ambiguous(arg, result.count));
+    return reply(ctx, r.notFound(arg));
   }
   const all = ses.listSessions(uid);
   const picks = all.map((s) => ({ name: s.name, sid8: ses.sid8(s.id) }));
@@ -226,27 +210,27 @@ bot.command("status", async (ctx) => {
 
 bot.callbackQuery(/^resume:(.+)$/, async (ctx) => {
   const sid8 = ctx.match[1];
-  const s = ses.switchTo(ctx.from!.id, sid8);
+  const result = ses.switchTo(ctx.from!.id, sid8);
   await ctx.answerCallbackQuery();
-  if (!s) {
+  if (result.kind !== "found") {
     await ctx.editMessageText(r.notFound(sid8).replace(/<[^>]+>/g, ""));
     return;
   }
-  await ctx.editMessageText(`${r.tag.report}切換對象 → ${s.name}`, {
+  await ctx.editMessageText(`${r.tag.report}切換對象 → ${result.session.name}`, {
     parse_mode: "HTML",
   });
 });
 
 bot.callbackQuery(/^delete:(.+)$/, async (ctx) => {
   const sid8 = ctx.match[1];
-  const removed = ses.deleteSession(ctx.from!.id, sid8);
+  const result = ses.deleteByPrefix(ctx.from!.id, sid8);
   await ctx.answerCallbackQuery();
-  if (!removed) {
+  if (result.kind !== "found") {
     await ctx.editMessageText(r.notFound(sid8).replace(/<[^>]+>/g, ""));
     return;
   }
   await ctx.editMessageText(
-    `${r.tag.report}個體 ${removed.name} (${sid8}) 已抹消。`,
+    `${r.tag.report}個體 ${result.session.name} (${sid8}) 已抹消。`,
     { parse_mode: "HTML" },
   );
 });
@@ -288,7 +272,7 @@ bot.on("message:photo", async (ctx) => {
   const filename = `photo-${Date.now()}.jpg`;
   const path = await handleAttachment(ctx, photo.file_id, filename);
   const caption = ctx.message.caption ?? "看一下這張圖。";
-  if (path) await runTurn(ctx, `${caption}\n\n圖片路徑：${path}`);
+  if (path) await runTurn(ctx, `${caption}\n\n圖片路徑：${path}`, replyTo(ctx));
 });
 
 bot.on("message:document", async (ctx) => {
@@ -299,158 +283,12 @@ bot.on("message:document", async (ctx) => {
     doc.file_name ?? `file-${Date.now()}`,
   );
   const caption = ctx.message.caption ?? "看一下這個檔案。";
-  if (path) await runTurn(ctx, `${caption}\n\n檔案路徑：${path}`);
+  if (path) await runTurn(ctx, `${caption}\n\n檔案路徑：${path}`, replyTo(ctx));
 });
-
-async function runTurn(ctx: Context, prompt: string): Promise<void> {
-  const uid = ctx.from!.id;
-  const active = ses.activeSession(uid);
-  if (!active) return reply(ctx, r.noActive());
-
-  if (ses.isBusy(active.id)) return reply(ctx, r.busy());
-
-  const isFirst = active.turnCount === 0;
-  ses.bumpTurn(uid);
-  const turnStart = Date.now();
-
-  const ac = new AbortController();
-  ses.setBusy(active.id, ac);
-  await ctx.replyWithChatAction("typing").catch(() => {});
-
-  // Per-segment streaming state (block index → buffered text + msg id)
-  interface SegState {
-    msgId: number | null;
-    text: string;
-    lastEditAt: number;
-    pendingEdit: NodeJS.Timeout | null;
-  }
-  const segs = new Map<number, SegState>();
-  const THROTTLE_MS = 500; // Telegram editMessageText 安全頻率
-
-  const flushSeg = async (idx: number, force: boolean): Promise<void> => {
-    const seg = segs.get(idx);
-    if (!seg || seg.msgId === null) return;
-    if (seg.pendingEdit) {
-      clearTimeout(seg.pendingEdit);
-      seg.pendingEdit = null;
-    }
-    seg.lastEditAt = Date.now();
-    const html = force
-      ? r.finalAnswer(seg.text || "…")
-      : r.md.esc(seg.text || "…") + " ▍";
-    try {
-      await ctx.api.editMessageText(ctx.chat!.id, seg.msgId, html, {
-        parse_mode: "HTML",
-      });
-    } catch (err: any) {
-      const desc = String(err?.description ?? "");
-      if (desc.includes("not modified")) return;
-      try {
-        await ctx.api.editMessageText(ctx.chat!.id, seg.msgId, seg.text);
-      } catch {}
-    }
-  };
-
-  const scheduleEdit = (idx: number): void => {
-    const seg = segs.get(idx);
-    if (!seg) return;
-    const elapsed = Date.now() - seg.lastEditAt;
-    if (elapsed >= THROTTLE_MS) {
-      void flushSeg(idx, false);
-      return;
-    }
-    if (!seg.pendingEdit) {
-      seg.pendingEdit = setTimeout(() => {
-        void flushSeg(idx, false);
-      }, THROTTLE_MS - elapsed);
-    }
-  };
-
-  const onEvent = async (e: ClaudeEvent) => {
-    switch (e.kind) {
-      case "tool_use":
-        await reply(ctx, r.toolCall(e.name, e.input));
-        break;
-      case "tool_result":
-        if (e.isError) await reply(ctx, r.toolFail(e.content));
-        break;
-      case "stream_text_start": {
-        // Eager 建 placeholder 訊息，避免 throttle 觸發 race 同時建多條
-        let msgId: number | null = null;
-        try {
-          const m = await ctx.reply("…", { parse_mode: "HTML" });
-          msgId = m.message_id;
-        } catch {}
-        segs.set(e.index, {
-          msgId,
-          text: "",
-          lastEditAt: 0,
-          pendingEdit: null,
-        });
-        break;
-      }
-      case "stream_text_delta": {
-        const seg = segs.get(e.index);
-        if (!seg) break;
-        seg.text += e.delta;
-        scheduleEdit(e.index);
-        break;
-      }
-      case "stream_text_stop": {
-        const seg = segs.get(e.index);
-        if (!seg) break;
-        if (!seg.text && seg.msgId !== null) {
-          // 空文字段：placeholder 不留下垃圾
-          await ctx.api
-            .deleteMessage(ctx.chat!.id, seg.msgId)
-            .catch(() => {});
-        } else {
-          await flushSeg(e.index, true);
-        }
-        segs.delete(e.index);
-        break;
-      }
-      case "thinking":
-        break;
-      case "usage":
-        ses.addUsage(uid, e.inputTokens, e.outputTokens);
-        await reply(ctx, r.turnComplete(e));
-        break;
-      case "error":
-        await reply(ctx, r.toolFail(e.message));
-        break;
-      case "done":
-        // 收尾：把任何還沒 stop 的 segment flush
-        for (const idx of segs.keys()) await flushSeg(idx, true);
-        segs.clear();
-        break;
-    }
-    if (e.kind !== "done" && e.kind !== "usage" && e.kind !== "stream_text_delta") {
-      await ctx.replyWithChatAction("typing").catch(() => {});
-    }
-  };
-
-  try {
-    await runClaude({
-      sessionId: active.id,
-      cwd: active.cwd,
-      prompt,
-      isFirst,
-      description: active.description,
-      signal: ac.signal,
-      timeoutMs: TURN_TIMEOUT_MS,
-      onEvent,
-    });
-  } catch (err: any) {
-    await reply(ctx, r.toolFail(String(err?.message ?? err)));
-  } finally {
-    ses.clearBusy(active.id);
-  }
-}
 
 bot.on("message:text", async (ctx) => {
   if (ctx.message.text.startsWith("/")) return;
-  await runTurn(ctx, ctx.message.text);
+  await runTurn(ctx, ctx.message.text, replyTo(ctx));
 });
 
 bot.catch((err) => {
@@ -465,7 +303,6 @@ await bot.api.setMyCommands([
   { command: "help", description: "指令一覽" },
   { command: "new", description: "創設新個體" },
   { command: "list", description: "所有個體" },
-  { command: "use", description: "切換 active" },
   { command: "resume", description: "喚回個體（無參數跳選單）" },
   { command: "clear", description: "停泊當前個體" },
   { command: "delete", description: "抹消個體（無參數跳選單）" },
@@ -473,8 +310,27 @@ await bot.api.setMyCommands([
   { command: "status", description: "系統狀態" },
   { command: "mcp", description: "MCP server 一覽與認證狀態" },
   { command: "skills", description: "可用 skills" },
-  { command: "usage", description: "token 使用量報告" },
+  { command: "usage", description: "Claude Code 訂閱用量" },
 ]);
+
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received`);
+  try {
+    await bot.stop();
+  } catch (err) {
+    console.warn("[shutdown] bot.stop failed:", err);
+  }
+  const cancelled = ses.cancelAll();
+  if (cancelled > 0) console.log(`[shutdown] aborted ${cancelled} running turns`);
+  await ses.flushNow();
+  console.log("[shutdown] sessions persisted, bye");
+  process.exit(0);
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
 
 console.log("[boot] Raphael online.");
 await bot.start({

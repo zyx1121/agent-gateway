@@ -63,7 +63,25 @@ interface BlockState {
 
 // 快速 probe：跑一個極小的 claude -p，攔到 system init line 就 kill。
 // 用於 /skills /mcp 之類即時查詢。
+const INIT_TTL_MS = 30_000;
+let initCache: {
+  data: { skills: string[]; mcpServers: { name: string; status: string }[] };
+  at: number;
+} | null = null;
+
 export async function probeInit(): Promise<{
+  skills: string[];
+  mcpServers: { name: string; status: string }[];
+}> {
+  if (initCache && Date.now() - initCache.at < INIT_TTL_MS) {
+    return initCache.data;
+  }
+  const data = await actualProbeInit();
+  initCache = { data, at: Date.now() };
+  return data;
+}
+
+async function actualProbeInit(): Promise<{
   skills: string[];
   mcpServers: { name: string; status: string }[];
 }> {
@@ -203,7 +221,9 @@ export async function runClaude(args: RunArgs): Promise<void> {
 
   child.stderr!.on("data", (chunk: Buffer) => {
     const msg = chunk.toString("utf8").trim();
-    if (msg) args.onEvent({ kind: "error", message: msg });
+    // claude 把 warning/info 也走 stderr，不全部當 error 推給 user。
+    // 真正錯誤會由 stream-json 的 result event 或非零 exit code 反映。
+    if (msg) console.warn("[claude:stderr]", msg);
   });
 
   await new Promise<void>((resolve) => {
@@ -332,7 +352,19 @@ export interface UsageBar {
 }
 
 // 跑原生 claude TUI 攔 /usage 渲染輸出 → parse 出三條 bar 數值
+const USAGE_TTL_MS = 60_000;
+let usageCache: { data: UsageBar[]; at: number } | null = null;
+
 export async function probeUsage(): Promise<UsageBar[]> {
+  if (usageCache && Date.now() - usageCache.at < USAGE_TTL_MS) {
+    return usageCache.data;
+  }
+  const data = await actualProbeUsage();
+  usageCache = { data, at: Date.now() };
+  return data;
+}
+
+async function actualProbeUsage(): Promise<UsageBar[]> {
   const claudeDir = config.claudeBin.includes("/")
     ? config.claudeBin.slice(0, config.claudeBin.lastIndexOf("/"))
     : null;

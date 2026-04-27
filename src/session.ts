@@ -10,6 +10,8 @@ export interface AgentSession {
   createdAt: number;
   lastActivityAt: number;
   turnCount: number;
+  /** True once Claude side acknowledged the session (init event arrived). */
+  initialized?: boolean;
   totalInputTokens?: number;
   totalOutputTokens?: number;
 }
@@ -19,19 +21,26 @@ interface UserState {
   activeId: string | null;
 }
 
+export type MatchResult<T> =
+  | { kind: "found"; session: T }
+  | { kind: "none" }
+  | { kind: "ambiguous"; count: number };
+
 const state = new Map<number, UserState>();
-const busy = new Map<string, AbortController>(); // sessionId -> abort controller
+const busy = new Map<string, AbortController>();
 let dirty = false;
+let persistTimer: NodeJS.Timeout | null = null;
+const PERSIST_DEBOUNCE_MS = 200;
 
 export async function loadAll(): Promise<void> {
   try {
     const raw = await readFile(config.sessionsFile, "utf8");
     const parsed = JSON.parse(raw) as Record<string, UserState>;
     for (const [k, v] of Object.entries(parsed)) {
-      // backfill missing fields on older entries
       for (const s of v.sessions) {
         s.lastActivityAt ??= s.createdAt;
         s.description ??= undefined;
+        s.initialized ??= s.turnCount > 0;
       }
       state.set(Number(k), v);
     }
@@ -48,9 +57,23 @@ async function persist(): Promise<void> {
   dirty = false;
 }
 
-setInterval(() => {
-  void persist();
-}, 5_000).unref();
+function markDirty(): void {
+  dirty = true;
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void persist();
+  }, PERSIST_DEBOUNCE_MS);
+  persistTimer.unref?.();
+}
+
+export async function flushNow(): Promise<void> {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  await persist();
+}
 
 const ensure = (uid: number): UserState => {
   let s = state.get(uid);
@@ -92,10 +115,11 @@ export function createSession(
     createdAt: now,
     lastActivityAt: now,
     turnCount: 0,
+    initialized: false,
   };
   s.sessions.push(session);
   s.activeId = id;
-  dirty = true;
+  markDirty();
   return session;
 }
 
@@ -104,30 +128,40 @@ export function clearActive(uid: number): AgentSession | null {
   const cur = s.sessions.find((x) => x.id === s.activeId);
   if (!cur) return null;
   s.activeId = null;
-  dirty = true;
+  markDirty();
   return cur;
 }
 
-export function deleteSession(
-  uid: number,
-  sid8Prefix: string,
-): AgentSession | null {
-  const s = ensure(uid);
-  const idx = s.sessions.findIndex((x) => x.id.startsWith(sid8Prefix));
-  if (idx < 0) return null;
-  const [removed] = s.sessions.splice(idx, 1);
-  if (s.activeId === removed.id) s.activeId = null;
-  dirty = true;
-  return removed;
+function findMatching(uid: number, prefix: string): AgentSession[] {
+  return ensure(uid).sessions.filter((x) => x.id.startsWith(prefix));
 }
 
-export function switchTo(uid: number, sid8: string): AgentSession | null {
+export function deleteByPrefix(
+  uid: number,
+  prefix: string,
+): MatchResult<AgentSession> {
+  const matches = findMatching(uid, prefix);
+  if (matches.length === 0) return { kind: "none" };
+  if (matches.length > 1) return { kind: "ambiguous", count: matches.length };
   const s = ensure(uid);
-  const found = s.sessions.find((x) => x.id.startsWith(sid8));
-  if (!found) return null;
-  s.activeId = found.id;
-  dirty = true;
-  return found;
+  const target = matches[0];
+  s.sessions = s.sessions.filter((x) => x.id !== target.id);
+  if (s.activeId === target.id) s.activeId = null;
+  markDirty();
+  return { kind: "found", session: target };
+}
+
+export function switchTo(
+  uid: number,
+  prefix: string,
+): MatchResult<AgentSession> {
+  const matches = findMatching(uid, prefix);
+  if (matches.length === 0) return { kind: "none" };
+  if (matches.length > 1) return { kind: "ambiguous", count: matches.length };
+  const s = ensure(uid);
+  s.activeId = matches[0].id;
+  markDirty();
+  return { kind: "found", session: matches[0] };
 }
 
 export function bumpTurn(uid: number): void {
@@ -135,7 +169,18 @@ export function bumpTurn(uid: number): void {
   if (a) {
     a.turnCount++;
     a.lastActivityAt = Date.now();
-    dirty = true;
+    markDirty();
+  }
+}
+
+export function markInitialized(sessionId: string): void {
+  for (const v of state.values()) {
+    const s = v.sessions.find((x) => x.id === sessionId);
+    if (s && !s.initialized) {
+      s.initialized = true;
+      markDirty();
+      return;
+    }
   }
 }
 
@@ -148,7 +193,7 @@ export function addUsage(
   if (a) {
     a.totalInputTokens = (a.totalInputTokens ?? 0) + input;
     a.totalOutputTokens = (a.totalOutputTokens ?? 0) + output;
-    dirty = true;
+    markDirty();
   }
 }
 
@@ -172,6 +217,15 @@ export function cancel(sessionId: string): boolean {
   if (!ac) return false;
   ac.abort();
   return true;
+}
+
+export function cancelAll(): number {
+  let n = 0;
+  for (const ac of busy.values()) {
+    ac.abort();
+    n++;
+  }
+  return n;
 }
 
 export const sid8 = (id: string): string => id.slice(0, 8);
