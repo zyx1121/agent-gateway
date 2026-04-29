@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { config } from "./config.js";
 import { probeInit, probeUsage } from "./claude.js";
 import * as ses from "./session.js";
+import * as update from "./update.js";
 import r from "./personas/index.js";
 import { runTurn } from "./runner.js";
 
@@ -193,6 +194,35 @@ bot.command("usage", async (ctx) => {
   await reply(ctx, r.usageBars(bars));
 });
 
+bot.command("update", async (ctx) => {
+  const arg = (ctx.match?.trim() ?? "").toLowerCase();
+  if (!arg) return reply(ctx, r.updateUsage());
+  if (arg !== "gateway" && arg !== "claude") {
+    return reply(ctx, r.updateUnknown(arg));
+  }
+
+  await ctx.replyWithChatAction("typing").catch(() => {});
+  await reply(ctx, r.updateBegin(arg));
+
+  try {
+    const result =
+      arg === "gateway"
+        ? await update.updateGateway()
+        : await update.updateClaude();
+    await reply(
+      ctx,
+      r.updateResult(arg, result.before, result.after, result.changed, result.log),
+    );
+    if (arg === "gateway" && result.changed) {
+      await reply(ctx, r.gatewayReloading());
+      update.reloadProcess("agent-gateway");
+    }
+  } catch (err: any) {
+    const msg = String(err?.stderr || err?.stdout || err?.message || err);
+    await reply(ctx, r.updateError(arg, msg));
+  }
+});
+
 bot.command("status", async (ctx) => {
   const uid = ctx.from!.id;
   const active = ses.activeSession(uid);
@@ -311,6 +341,7 @@ await bot.api.setMyCommands([
   { command: "mcp", description: "MCP server 一覽與認證狀態" },
   { command: "skills", description: "可用 skills" },
   { command: "usage", description: "Claude Code 訂閱用量" },
+  { command: "update", description: "升級 gateway / claude" },
 ]);
 
 let shuttingDown = false;

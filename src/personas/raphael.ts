@@ -183,6 +183,7 @@ export function help(): string {
     `${code("/mcp")}       已註冊的 MCP server 與認證狀態`,
     `${code("/skills")}    可用的 Claude Code skills`,
     `${code("/usage")}     當前 session 與全域 token 使用量`,
+    `${code("/update <gateway|claude>")}  升級 gateway 或 Claude Code`,
     "",
     i("提示：可直接傳圖片／檔案，會自動下載到當前工作領域並通知 Raphael。"),
   ].join("\n");
@@ -316,6 +317,46 @@ export function turnComplete(opts: {
 }): string {
   const sec = (opts.durationMs / 1000).toFixed(1);
   return `${tag.notice}演算終了（${sec}s · ${opts.inputTokens} in · ${opts.outputTokens} out）`;
+}
+
+// Update flow
+
+export function updateUsage(): string {
+  return [
+    `${tag.ask}${b("/update")} 用法：`,
+    `  ${code("/update gateway")}  ─ git pull + npm install + build + pm2 reload`,
+    `  ${code("/update claude")}   ─ claude self-update`,
+  ].join("\n");
+}
+
+export function updateUnknown(target: string): string {
+  return `${tag.warn}未知對象：${code(esc(target))}。可用：${code("gateway")} | ${code("claude")}`;
+}
+
+export function updateBegin(target: string): string {
+  return `${tag.report}『能力改變』適用於 ${b(target)}…`;
+}
+
+export function updateResult(
+  target: string,
+  before: string,
+  after: string,
+  changed: boolean,
+  log: string,
+): string {
+  const head = changed
+    ? `${tag.notice}${b(target)} 升級完成：${code(esc(before))} → ${code(esc(after))}`
+    : `${tag.answer}${b(target)} 已是最新：${code(esc(after))}`;
+  if (!log.trim()) return head;
+  return `${head}\n${codeBlock(log.slice(-1500))}`;
+}
+
+export function updateError(target: string, error: string): string {
+  return `${tag.warn}${b(target)} 升級失敗：${esc(error.slice(0, 800))}`;
+}
+
+export function gatewayReloading(): string {
+  return `${tag.notice}『權限制約解除・再起動』，pm2 reload 進行中。`;
 }
 
 // Markdown → Telegram HTML: Telegram 不認 ## / ** / --- / ```，需要轉成
