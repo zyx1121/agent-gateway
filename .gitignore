@@ -6,3 +6,5 @@ sessions.json
 .DS_Store
 bun.lock
 smoke.mjs
+pty-poc.mjs
+login-poc.mjs

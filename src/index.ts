@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { probeInit, probeUsage } from "./claude.js";
 import * as ses from "./session.js";
 import * as update from "./update.js";
+import * as pty from "./pty.js";
 import r from "./personas/index.js";
 import { runTurn } from "./runner.js";
 
@@ -194,6 +195,17 @@ bot.command("usage", async (ctx) => {
   await reply(ctx, r.usageBars(bars));
 });
 
+bot.command("login", async (ctx) => {
+  await reply(ctx, r.loginBegin());
+  const result = await pty.loginFlow({
+    onUrl: async (url) => {
+      await reply(ctx, r.loginUrl(url));
+    },
+  });
+  if (result.ok) await reply(ctx, r.loginOk(result.tail));
+  else await reply(ctx, r.loginFail(result.error ?? "unknown", result.tail));
+});
+
 bot.command("update", async (ctx) => {
   const arg = (ctx.match?.trim() ?? "").toLowerCase();
   if (!arg) return reply(ctx, r.updateUsage());
@@ -342,6 +354,7 @@ await bot.api.setMyCommands([
   { command: "skills", description: "可用 skills" },
   { command: "usage", description: "Claude Code 訂閱用量" },
   { command: "update", description: "升級 gateway / claude" },
+  { command: "login", description: "PTY-based claude OAuth 登入" },
 ]);
 
 let shuttingDown = false;

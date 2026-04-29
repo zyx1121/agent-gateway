@@ -184,6 +184,7 @@ export function help(): string {
     `${code("/skills")}    可用的 Claude Code skills`,
     `${code("/usage")}     當前 session 與全域 token 使用量`,
     `${code("/update <gateway|claude>")}  升級 gateway 或 Claude Code`,
+    `${code("/login")}     PTY 介接 claude REPL 走 OAuth（截 URL 給你）`,
     "",
     i("提示：可直接傳圖片／檔案，會自動下載到當前工作領域並通知 Raphael。"),
   ].join("\n");
@@ -357,6 +358,31 @@ export function updateError(target: string, error: string): string {
 
 export function gatewayReloading(): string {
   return `${tag.notice}『權限制約解除・再起動』，pm2 reload 進行中。`;
+}
+
+// Login (PTY-driven OAuth) flow
+
+export function loginBegin(): string {
+  return `${tag.report}『權限制約解除』認證流程啟動。PTY 介接 claude REPL，最長等待五分鐘。`;
+}
+
+export function loginUrl(url: string): string {
+  return [
+    `${tag.notice}OAuth URL 已截獲：`,
+    `<a href="${esc(url)}">${esc(url)}</a>`,
+    "",
+    i("打開連結完成驗證；完成後我會自動偵測。"),
+  ].join("\n");
+}
+
+export function loginOk(tail: string): string {
+  const block = tail.trim() ? `\n${codeBlock(tail.slice(-400))}` : "";
+  return `${tag.report}認證完成。${block}`;
+}
+
+export function loginFail(error: string, tail: string): string {
+  const block = tail.trim() ? `\n${codeBlock(tail.slice(-400))}` : "";
+  return `${tag.warn}認證未完成：${esc(error.slice(0, 200))}${block}`;
 }
 
 // Markdown → Telegram HTML: Telegram 不認 ## / ** / --- / ```，需要轉成
