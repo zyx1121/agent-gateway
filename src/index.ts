@@ -202,19 +202,31 @@ bot.command("login", async (ctx) => {
   if (!ctx.chat) return;
   const chatId = ctx.chat.id;
   await reply(ctx, r.loginBegin());
-  const result = await pty.loginFlow({
-    onUrl: async (url) => {
-      await reply(ctx, r.loginUrl(url));
-    },
-    onCodePrompt: () =>
-      new Promise<string>((resolve) => {
-        awaitingCodeByChat.set(chatId, resolve);
-        reply(ctx, r.loginCodePrompt()).catch(() => {});
-      }),
-  });
-  awaitingCodeByChat.delete(chatId);
-  if (result.ok) await reply(ctx, r.loginOk(result.tail));
-  else await reply(ctx, r.loginFail(result.error ?? "unknown", result.tail));
+
+  // Fire-and-forget. grammy dispatches updates sequentially per chat; if we
+  // awaited loginFlow here (it blocks up to 5 min waiting for the OAuth URL
+  // and the user's pasted code), the message carrying the code itself would
+  // never get dispatched — deadlock by self-blocking.
+  void pty
+    .loginFlow({
+      onUrl: (url) => reply(ctx, r.loginUrl(url)),
+      onCodePrompt: () =>
+        new Promise<string>((resolve) => {
+          awaitingCodeByChat.set(chatId, resolve);
+          reply(ctx, r.loginCodePrompt()).catch(() => {});
+        }),
+    })
+    .then((result) => {
+      awaitingCodeByChat.delete(chatId);
+      if (result.ok) return reply(ctx, r.loginOk(result.tail));
+      return reply(ctx, r.loginFail(result.error ?? "unknown", result.tail));
+    })
+    .catch((err) => {
+      awaitingCodeByChat.delete(chatId);
+      reply(ctx, r.loginFail(String(err?.message ?? err), "")).catch(
+        () => {},
+      );
+    });
 });
 
 async function runUpdate(
