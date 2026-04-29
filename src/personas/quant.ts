@@ -442,6 +442,17 @@ export function loginFail(error: string, tail: string): string {
   return `${tag.warn}login failed: ${esc(error.slice(0, 200))}${block}`;
 }
 
+export function loginCodePrompt(): string {
+  return [
+    `${tag.ask}瀏覽器授權完成後會吐出一段 authorization code，`,
+    "把那段 code 直接回覆過來，我會替你送進 PTY。",
+  ].join("\n");
+}
+
+export function loginCodeReceived(): string {
+  return `${i("code 收到，提交中…")}`;
+}
+
 export function mdToHtml(text: string): string {
   let s = text
     .replace(/&/g, "&amp;")

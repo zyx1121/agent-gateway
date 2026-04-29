@@ -56,6 +56,9 @@ const URL_RE = /https:\/\/[^\s\x1b\)\]"'`,;]+/g;
 
 export interface AuthFlowOpts {
   onUrl: (url: string) => Promise<void> | void;
+  // After OAuth in browser, claude prompts for the authorization code.
+  // Resolve with the code string; loginFlow forwards it to the REPL.
+  onCodePrompt?: () => Promise<string> | string;
   timeoutMs?: number;
 }
 
@@ -98,6 +101,7 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
     let themeAcked = false;
     let loginIssued = false;
     let methodAcked = false;
+    let codePromptHandled = false;
 
     // Claude pretty-prints with cursor positioning — strip whitespace before
     // matching so "Select login method" reads as "selectloginmethod" reliably.
@@ -118,6 +122,22 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
       if (loginIssued && !methodAcked && /selectloginmethod/.test(recentNorm)) {
         methodAcked = true;
         setTimeout(() => term.send("\r"), 700);
+      }
+
+      // After URL shown, claude prompts to paste the auth code.
+      if (
+        loginIssued &&
+        !codePromptHandled &&
+        opts.onCodePrompt &&
+        /paste.{0,60}(code|here)/.test(recentNorm)
+      ) {
+        codePromptHandled = true;
+        Promise.resolve(opts.onCodePrompt())
+          .then((code) => {
+            const trimmed = (code ?? "").trim();
+            if (trimmed) term.send(trimmed + "\r");
+          })
+          .catch(() => {});
       }
 
       // Match against cumulative buffer — a long URL may arrive split across

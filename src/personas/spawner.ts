@@ -405,6 +405,17 @@ export function loginFail(error: string, tail: string): string {
   return `${tag.warn}login failed: ${esc(error.slice(0, 200))}${block}`;
 }
 
+export function loginCodePrompt(): string {
+  return [
+    `${tag.ask}browser auth done? paste the authorization code here as the next message;`,
+    "I'll forward it to the claude REPL.",
+  ].join("\n");
+}
+
+export function loginCodeReceived(): string {
+  return `${i("code received, submitting…")}`;
+}
+
 // Markdown → Telegram HTML
 export function mdToHtml(text: string): string {
   let s = text

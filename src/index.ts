@@ -195,13 +195,24 @@ bot.command("usage", async (ctx) => {
   await reply(ctx, r.usageBars(bars));
 });
 
+// chat_id → resolver for the next text message (claude OAuth code paste-back).
+const awaitingCodeByChat = new Map<number, (code: string) => void>();
+
 bot.command("login", async (ctx) => {
+  if (!ctx.chat) return;
+  const chatId = ctx.chat.id;
   await reply(ctx, r.loginBegin());
   const result = await pty.loginFlow({
     onUrl: async (url) => {
       await reply(ctx, r.loginUrl(url));
     },
+    onCodePrompt: () =>
+      new Promise<string>((resolve) => {
+        awaitingCodeByChat.set(chatId, resolve);
+        reply(ctx, r.loginCodePrompt()).catch(() => {});
+      }),
   });
+  awaitingCodeByChat.delete(chatId);
   if (result.ok) await reply(ctx, r.loginOk(result.tail));
   else await reply(ctx, r.loginFail(result.error ?? "unknown", result.tail));
 });
@@ -350,6 +361,19 @@ bot.on("message:document", async (ctx) => {
 
 bot.on("message:text", async (ctx) => {
   if (ctx.message.text.startsWith("/")) return;
+
+  // While /login is awaiting an OAuth code on this chat, hijack the next
+  // text message and pipe it back to the PTY instead of running a turn.
+  if (ctx.chat) {
+    const codeResolver = awaitingCodeByChat.get(ctx.chat.id);
+    if (codeResolver) {
+      awaitingCodeByChat.delete(ctx.chat.id);
+      codeResolver(ctx.message.text);
+      await reply(ctx, r.loginCodeReceived());
+      return;
+    }
+  }
+
   await runTurn(ctx, ctx.message.text, replyTo(ctx));
 });
 

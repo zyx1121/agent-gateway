@@ -389,6 +389,17 @@ export function loginFail(error: string, tail: string): string {
   return `${tag.warn}認證未完成：${esc(error.slice(0, 200))}${block}`;
 }
 
+export function loginCodePrompt(): string {
+  return [
+    `${tag.ask}瀏覽器同意後會吐出一段 authorization code，`,
+    "把那段 code 直接回覆過來，我會替你提交到 PTY。",
+  ].join("\n");
+}
+
+export function loginCodeReceived(): string {
+  return `${i("code 收下，提交中…")}`;
+}
+
 // Markdown → Telegram HTML: Telegram 不認 ## / ** / --- / ```，需要轉成
 // supported HTML tags: <b> <i> <code> <pre> <a>
 export function mdToHtml(text: string): string {
