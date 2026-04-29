@@ -120,10 +120,14 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
         setTimeout(() => term.send("\r"), 700);
       }
 
-      for (const m of clean.matchAll(URL_RE)) {
+      // Match against cumulative buffer — a long URL may arrive split across
+      // PTY chunks. Host list covers current and legacy claude OAuth domains.
+      for (const m of cleanBuf.matchAll(URL_RE)) {
         const url = m[0];
         if (
-          (url.includes("claude.ai") || url.includes("anthropic.com")) &&
+          (url.includes("claude.ai") ||
+            url.includes("claude.com") ||
+            url.includes("anthropic.com")) &&
           !seenUrls.has(url)
         ) {
           seenUrls.add(url);
