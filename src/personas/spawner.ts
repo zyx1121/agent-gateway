@@ -3,6 +3,8 @@
  * Module shape conforms to the Persona contract consumed by core (index.ts, runner.ts).
  */
 
+import { renderMdTables } from "./_markdown.js";
+
 export const id: string = "spawner";
 export const displayName: string = "Spawner";
 
@@ -427,7 +429,8 @@ export function loginCodeReceived(): string {
 
 // Markdown → Telegram HTML
 export function mdToHtml(text: string): string {
-  let s = text
+  // Telegram has no <table>; rewrite GFM tables as monospace code blocks first.
+  let s = renderMdTables(text)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
