@@ -1,6 +1,7 @@
 import type { Context } from "grammy";
 import { runClaude, type ClaudeEvent } from "./claude.js";
 import * as ses from "./session.js";
+import { logTurn } from "./turnlog.js";
 import r from "./personas/index.js";
 
 export const TURN_TIMEOUT_MS = 10 * 60_000;
@@ -43,11 +44,29 @@ export async function runTurn(
   ses.setBusy(active.id, ac);
   await ctx.replyWithChatAction("typing").catch(() => {});
 
+  const chatId = ctx.chat?.id ?? 0;
+  void logTurn({
+    ts: turnStart,
+    chatId,
+    userId: uid,
+    sessionId: active.id,
+    kind: "start",
+    prompt,
+  });
+
   const segs = new Map<number, SegState>();
 
   const flushSeg = async (idx: number, force: boolean): Promise<void> => {
     const seg = segs.get(idx);
-    if (!seg || seg.msgId === null) return;
+    if (!seg) return;
+    // Placeholder reply hasn't returned yet. On force=true (final flush) we
+    // fall back to a fresh reply so the answer never gets lost; on the
+    // streaming path we just defer until the next tick.
+    if (seg.msgId === null) {
+      if (!force) return;
+      if (seg.text) await reply(r.finalAnswer(seg.text));
+      return;
+    }
     if (seg.pendingEdit) {
       clearTimeout(seg.pendingEdit);
       seg.pendingEdit = null;
@@ -93,22 +112,40 @@ export async function runTurn(
         break;
       case "tool_use":
         await reply(r.toolCall(e.name, e.input));
+        void logTurn({
+          ts: Date.now(),
+          chatId,
+          userId: uid,
+          sessionId: active.id,
+          kind: "tool",
+          toolName: e.name,
+          toolInput: e.input,
+        });
         break;
       case "tool_result":
         if (e.isError) await reply(r.toolFail(e.content));
         break;
       case "stream_text_start": {
-        let msgId: number | null = null;
-        try {
-          const m = await ctx.reply("…", { parse_mode: "HTML" });
-          msgId = m.message_id;
-        } catch {}
+        // Set the seg synchronously BEFORE awaiting telegram so a delta that
+        // arrives mid-await still finds an entry to append to. msgId is
+        // filled in once the placeholder reply comes back; flushSeg is a
+        // no-op while it's null and will retry on the next throttle tick.
         segs.set(e.index, {
-          msgId,
+          msgId: null,
           text: "",
           lastEditAt: 0,
           pendingEdit: null,
         });
+        ctx
+          .reply("…", { parse_mode: "HTML" })
+          .then((m) => {
+            const seg = segs.get(e.index);
+            if (seg) {
+              seg.msgId = m.message_id;
+              scheduleEdit(e.index);
+            }
+          })
+          .catch(() => {});
         break;
       }
       case "stream_text_delta": {
@@ -127,6 +164,14 @@ export async function runTurn(
             .catch(() => {});
         } else {
           await flushSeg(e.index, true);
+          void logTurn({
+            ts: Date.now(),
+            chatId,
+            userId: uid,
+            sessionId: active.id,
+            kind: "answer",
+            text: seg.text,
+          });
         }
         segs.delete(e.index);
         break;
@@ -136,6 +181,16 @@ export async function runTurn(
       case "usage":
         ses.addUsage(uid, e.inputTokens, e.outputTokens);
         await reply(r.turnComplete(e));
+        void logTurn({
+          ts: Date.now(),
+          chatId,
+          userId: uid,
+          sessionId: active.id,
+          kind: "end",
+          durationMs: e.durationMs,
+          inputTokens: e.inputTokens,
+          outputTokens: e.outputTokens,
+        });
         break;
       case "error":
         await reply(r.toolFail(e.message));
@@ -168,6 +223,14 @@ export async function runTurn(
     });
   } catch (err: any) {
     await reply(r.toolFail(String(err?.message ?? err)));
+    void logTurn({
+      ts: Date.now(),
+      chatId,
+      userId: uid,
+      sessionId: active.id,
+      kind: "error",
+      error: String(err?.message ?? err),
+    });
   } finally {
     ses.clearBusy(active.id);
   }

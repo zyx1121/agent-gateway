@@ -8,6 +8,7 @@ import * as update from "./update.js";
 import * as pty from "./pty.js";
 import r from "./personas/index.js";
 import { runTurn } from "./runner.js";
+import { tailTurns } from "./turnlog.js";
 
 const BOOT_AT = Date.now();
 
@@ -293,6 +294,37 @@ bot.command("status", async (ctx) => {
   );
 });
 
+bot.command("trace", async (ctx) => {
+  const arg = (ctx.match?.trim() ?? "10").toLowerCase();
+  const n = Math.max(1, Math.min(50, parseInt(arg, 10) || 10));
+  const records = tailTurns(n);
+  if (records.length === 0) {
+    await reply(ctx, "<i>no turns logged yet</i>");
+    return;
+  }
+  const lines: string[] = [`<b>last ${records.length} events</b>`];
+  for (const t of records) {
+    const ts = new Date(t.ts).toISOString().slice(11, 19);
+    const sid = (t.sessionId ?? "").slice(0, 8);
+    const head = `${ts}  ${sid}  <b>${t.kind}</b>`;
+    if (t.kind === "start") {
+      lines.push(`${head}\n  prompt: ${r.md.code((t.prompt ?? "").slice(0, 200))}`);
+    } else if (t.kind === "tool") {
+      lines.push(`${head}  ${r.md.code(t.toolName ?? "?")}`);
+    } else if (t.kind === "answer") {
+      const preview = (t.text ?? "").slice(0, 200).replace(/\n/g, " ↵ ");
+      lines.push(`${head}\n  ${r.md.esc(preview)}`);
+    } else if (t.kind === "end") {
+      lines.push(
+        `${head}  ${t.durationMs}ms · ${t.inputTokens} in · ${t.outputTokens} out`,
+      );
+    } else if (t.kind === "error") {
+      lines.push(`${head}\n  ${r.md.esc((t.error ?? "").slice(0, 300))}`);
+    }
+  }
+  await reply(ctx, lines.join("\n\n"));
+});
+
 bot.callbackQuery(/^resume:(.+)$/, async (ctx) => {
   const sid8 = ctx.match[1];
   const result = ses.switchTo(ctx.from!.id, sid8);
@@ -411,6 +443,7 @@ await bot.api.setMyCommands([
   { command: "usage", description: "Claude Code 訂閱用量" },
   { command: "update", description: "升級 gateway / claude" },
   { command: "login", description: "PTY-based claude OAuth 登入" },
+  { command: "trace", description: "近期 turn 日誌 (預設 10 筆，/trace 30 可調)" },
 ]);
 
 let shuttingDown = false;
