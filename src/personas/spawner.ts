@@ -320,6 +320,10 @@ export function updateUsage(): string {
   ].join("\n");
 }
 
+export function updatePicker(): string {
+  return `${tag.ask}pick update target:`;
+}
+
 export function updateUnknown(target: string): string {
   return `${tag.warn}unknown target: ${code(esc(target))}. available: ${code("gateway")} | ${code("claude")}`;
 }

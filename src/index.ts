@@ -206,33 +206,53 @@ bot.command("login", async (ctx) => {
   else await reply(ctx, r.loginFail(result.error ?? "unknown", result.tail));
 });
 
-bot.command("update", async (ctx) => {
-  const arg = (ctx.match?.trim() ?? "").toLowerCase();
-  if (!arg) return reply(ctx, r.updateUsage());
-  if (arg !== "gateway" && arg !== "claude") {
-    return reply(ctx, r.updateUnknown(arg));
-  }
-
+async function runUpdate(
+  ctx: Context,
+  target: "gateway" | "claude",
+): Promise<void> {
   await ctx.replyWithChatAction("typing").catch(() => {});
-  await reply(ctx, r.updateBegin(arg));
-
+  await reply(ctx, r.updateBegin(target));
   try {
     const result =
-      arg === "gateway"
+      target === "gateway"
         ? await update.updateGateway()
         : await update.updateClaude();
     await reply(
       ctx,
-      r.updateResult(arg, result.before, result.after, result.changed, result.log),
+      r.updateResult(target, result.before, result.after, result.changed, result.log),
     );
-    if (arg === "gateway" && result.changed) {
+    if (target === "gateway" && result.changed) {
       await reply(ctx, r.gatewayReloading());
       update.reloadProcess("agent-gateway");
     }
   } catch (err: any) {
     const msg = String(err?.stderr || err?.stdout || err?.message || err);
-    await reply(ctx, r.updateError(arg, msg));
+    await reply(ctx, r.updateError(target, msg));
   }
+}
+
+bot.command("update", async (ctx) => {
+  const arg = (ctx.match?.trim() ?? "").toLowerCase();
+  if (arg === "gateway" || arg === "claude") {
+    await runUpdate(ctx, arg);
+    return;
+  }
+  if (arg) return reply(ctx, r.updateUnknown(arg));
+
+  const kb = new InlineKeyboard()
+    .text("gateway", "update:gateway")
+    .text("claude", "update:claude");
+  await ctx.reply(r.updatePicker(), {
+    parse_mode: "HTML",
+    reply_markup: kb,
+  });
+});
+
+bot.callbackQuery(/^update:(gateway|claude)$/, async (ctx) => {
+  const target = ctx.match[1] as "gateway" | "claude";
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageReplyMarkup({}).catch(() => {});
+  await runUpdate(ctx, target);
 });
 
 bot.command("status", async (ctx) => {

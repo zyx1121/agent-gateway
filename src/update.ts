@@ -43,22 +43,35 @@ const tail = (s: string, n = 800): string => {
   return `…${trimmed.slice(-n)}`;
 };
 
+// Override NODE_ENV during install/build because pm2 sets it to "production",
+// which makes npm omit devDependencies (typescript, tsx) — and prune existing ones.
+// We need devDeps to compile, so force a development-flavored install for this flow.
+function buildEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    NODE_ENV: "development",
+    PATH: `${REPO_DIR}/node_modules/.bin:${process.env.PATH ?? ""}`,
+  };
+}
+
 export async function updateGateway(): Promise<UpdateResult> {
   const before = await gatewayCommit();
   const steps: string[] = [];
+  const env = buildEnv();
 
-  const pull = await execAsync("git pull --ff-only", { cwd: REPO_DIR });
+  const pull = await execAsync("git pull --ff-only", { cwd: REPO_DIR, env });
   steps.push(`git pull:\n${(pull.stdout + pull.stderr).trim()}`);
 
-  const install = await execAsync("npm install --no-audit --no-fund", {
-    cwd: REPO_DIR,
-    timeout: 180_000,
-  });
+  const install = await execAsync(
+    "npm install --include=dev --no-audit --no-fund",
+    { cwd: REPO_DIR, timeout: 180_000, env },
+  );
   steps.push(`npm install:\n${tail(install.stdout + install.stderr, 400)}`);
 
   const build = await execAsync("npm run build", {
     cwd: REPO_DIR,
     timeout: 60_000,
+    env,
   });
   steps.push(`npm run build:\n${(build.stdout + build.stderr).trim() || "(silent)"}`);
 

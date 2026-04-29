@@ -330,6 +330,10 @@ export function updateUsage(): string {
   ].join("\n");
 }
 
+export function updatePicker(): string {
+  return `${tag.ask}選擇升級對象：`;
+}
+
 export function updateUnknown(target: string): string {
   return `${tag.warn}未知對象：${code(esc(target))}。可用：${code("gateway")} | ${code("claude")}`;
 }
