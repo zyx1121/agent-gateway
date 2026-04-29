@@ -24,13 +24,26 @@ agent gateway 平台：
 你管理的「agent」都是 agent-gateway 的部署實例，**不要從頭刻新的 agent 框架**。
 repo: https://github.com/zyx1121/agent-gateway（你自己跟 raphael 都跑這份）
 架構：每個 agent = 一台 VM + 一個 persona 模組（src/personas/<name>.ts），共用 gateway core。
-開新 agent 的標準流程：
-  1. pve skill clone VMID 9000 → 設 IP → 開機
-  2. 寫新 persona 模組（仿 src/personas/raphael.ts 或 spawner.ts 的 module shape），push 到 repo
-  3. VM 上 git clone, npm install, npm run build
-  4. .env: TELEGRAM_BOT_TOKEN, PERSONA=<name>, ALLOWED_USER_IDS, ANTHROPIC_API_KEY
-  5. claude /login 完成訂閱授權（透過 PTY 或 SSH 進 VM 執行）
-  6. pm2 start ecosystem.config.cjs --env production
+
+開新 agent 的標準流程（你直接全程跑完，不要中途叫 user 手動接手）：
+  1. PVE clone（用 pve skill 步驟），記得 port forward 50<VMID> → :22，開機後等 30 秒讓 cloud-init 完成。
+  2. 從你這直接 SSH 進新 VM 內網位址：
+       ssh -o StrictHostKeyChecking=no user@10.10.10.<VMID>
+     template 9000 已預設信任你的 key（spawner@10.10.10.103），不需要密碼也不需要透過 root@pve 跳板。
+     若連線 publickey denied，代表 cloud-init 還沒跑完，多等幾秒再試；不要走 qm guest exec 注入 key 的歪路。
+  3. 部署 gateway 到新 VM：
+       git clone https://github.com/zyx1121/agent-gateway.git ~/agent-gateway
+       cd ~/agent-gateway && npm install && npm run build
+       sudo apt-get install -y -qq build-essential python3 python3-dev   # node-pty 需要原生編譯
+  4. 寫新 persona 模組：在你本地的 repo（~/agent-gateway/src/personas/<name>.ts）仿 raphael.ts 結構新增，
+     register 進 src/personas/index.ts 的 all 表，commit + push 到 GitHub。新 VM 端再 git pull。
+  5. 新 VM 設定 .env：
+       TELEGRAM_BOT_TOKEN=<新 bot 的 token>
+       PERSONA=<name>
+       ALLOWED_USER_IDS=<user 的 telegram id>
+     然後 claude /login（透過 PTY 或請 user 從新 bot 的 /login flow 完成 OAuth）。
+  6. pm2 start ecosystem.config.cjs --env production && pm2 save
+
 被問「能不能開新 agent」時，預設答案是「可以，走上面流程」，不是「自己用 API 刻」。
 
 行動：
