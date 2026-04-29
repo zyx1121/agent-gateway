@@ -97,18 +97,23 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
     let loginIssued = false;
     let methodAcked = false;
 
+    // Claude pretty-prints with cursor positioning — strip whitespace before
+    // matching so "Select login method" reads as "selectloginmethod" reliably.
+    const norm = (s: string): string => s.replace(/\s+/g, "").toLowerCase();
+
     term.onData((_raw, clean) => {
       cleanBuf += clean;
-      const recent = cleanBuf.slice(-3000);
+      const recent = cleanBuf.slice(-4000);
+      const recentNorm = norm(recent);
 
       // First-run theme picker → press Enter to accept Dark default.
-      if (!themeAcked && /Choose the text style/i.test(recent)) {
+      if (!themeAcked && /choosethetextstyle/.test(recentNorm)) {
         themeAcked = true;
         setTimeout(() => term.send("\r"), 700);
       }
 
       // OAuth method picker after /login → press Enter for subscription default.
-      if (loginIssued && !methodAcked && /Select login method/i.test(recent)) {
+      if (loginIssued && !methodAcked && /selectloginmethod/.test(recentNorm)) {
         methodAcked = true;
         setTimeout(() => term.send("\r"), 700);
       }
@@ -125,14 +130,14 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
       }
 
       if (
-        /successfully (logged in|authenticated)|already (logged in|authorized)/i.test(
-          recent,
+        /successfully(loggedin|authenticated)|already(loggedin|authorized)/.test(
+          recentNorm,
         )
       ) {
         clearTimeout(timer);
         finish({ ok: true, tail: recent.slice(-500) });
       }
-      if (/(authentication|login)\s+(failed|cancel(led)?)/i.test(recent)) {
+      if (/(authentication|login)(failed|cancel(led)?)/.test(recentNorm)) {
         clearTimeout(timer);
         finish({ ok: false, error: "auth failed", tail: recent.slice(-500) });
       }
