@@ -420,8 +420,21 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 
-console.log(`[boot] ${r.displayName} online.`);
-await bot.start({
-  drop_pending_updates: true,
-  onStart: (me) => console.log(`[boot] @${me.username} ready.`),
+// Polling can fail unrecoverably (e.g. 409 conflict during reload races,
+// invalid token). Surface the error and exit so pm2 respawns us instead of
+// staying alive but silently no longer fetching updates.
+process.on("unhandledRejection", (err) => {
+  console.error("[fatal] unhandledRejection:", err);
+  process.exit(1);
 });
+
+console.log(`[boot] ${r.displayName} online.`);
+bot
+  .start({
+    drop_pending_updates: true,
+    onStart: (me) => console.log(`[boot] @${me.username} ready.`),
+  })
+  .catch((err) => {
+    console.error("[boot] polling crashed, exiting for pm2 restart:", err);
+    process.exit(1);
+  });
