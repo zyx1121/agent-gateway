@@ -92,8 +92,26 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
     );
     timer.unref();
 
+    // First-run / OAuth wizard navigation flags — each prompt we drive once.
+    let themeAcked = false;
+    let loginIssued = false;
+    let methodAcked = false;
+
     term.onData((_raw, clean) => {
       cleanBuf += clean;
+      const recent = cleanBuf.slice(-3000);
+
+      // First-run theme picker → press Enter to accept Dark default.
+      if (!themeAcked && /Choose the text style/i.test(recent)) {
+        themeAcked = true;
+        setTimeout(() => term.send("\r"), 700);
+      }
+
+      // OAuth method picker after /login → press Enter for subscription default.
+      if (loginIssued && !methodAcked && /Select login method/i.test(recent)) {
+        methodAcked = true;
+        setTimeout(() => term.send("\r"), 700);
+      }
 
       for (const m of clean.matchAll(URL_RE)) {
         const url = m[0];
@@ -106,7 +124,6 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
         }
       }
 
-      const recent = cleanBuf.slice(-2000);
       if (
         /successfully (logged in|authenticated)|already (logged in|authorized)/i.test(
           recent,
@@ -130,7 +147,10 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
       });
     });
 
-    // Wait for REPL to settle, then issue /login.
-    setTimeout(() => term.send("/login\r"), 3500);
+    // First-run wizard may delay REPL; wait a bit longer than before.
+    setTimeout(() => {
+      loginIssued = true;
+      term.send("/login\r");
+    }, 5000);
   });
 }
