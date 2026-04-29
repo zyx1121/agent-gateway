@@ -15,8 +15,10 @@ export interface ClaudePty {
 export function spawnClaude(opts: { cwd?: string } = {}): ClaudePty {
   const term = pty.spawn(config.claudeBin, [], {
     name: "xterm-256color",
-    cols: 120,
-    rows: 30,
+    // Wide cols so long OAuth URLs aren't soft-wrapped (which inserts
+    // \r\n into the URL and defeats the URL regex).
+    cols: 2000,
+    rows: 50,
     cwd: opts.cwd ?? process.env.HOME ?? "/tmp",
     env: process.env as { [key: string]: string },
   });
