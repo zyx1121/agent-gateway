@@ -10,11 +10,13 @@
 
 import { config } from "../config.js";
 import * as raphael from "./raphael.js";
+import * as spawner from "./spawner.js";
 
 type Persona = typeof raphael;
 
 const all = {
   raphael,
+  spawner,
 } as const satisfies Record<string, Persona>;
 
 const name = config.persona;
