@@ -1,5 +1,16 @@
 import * as pty from "node-pty";
+import { writeFileSync } from "node:fs";
 import { config } from "./config.js";
+
+// Debug trace dropped to /tmp on every loginFlow finish so we can autopsy
+// failures without re-running the OAuth song-and-dance.
+const traceLog = (path: string, body: string): void => {
+  try {
+    writeFileSync(path, body);
+  } catch {
+    /* ignore */
+  }
+};
 
 // Strip CSI / OSC / single-char escape sequences so the buffer reads as plain text.
 const ANSI_RE = /\x1b\[[\?\d;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[\(\)].|\x1b[=>]/g;
@@ -75,13 +86,30 @@ export interface AuthFlowResult {
 export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
   return new Promise((resolve) => {
     const term = spawnClaude();
+    const startedAt = Date.now();
+    const events: string[] = [`[${Date.now()}] spawn claude`];
     let cleanBuf = "";
+    let rawBuf = "";
     const seenUrls = new Set<string>();
     let resolved = false;
 
     const finish = (r: AuthFlowResult) => {
       if (resolved) return;
       resolved = true;
+      events.push(`[${Date.now()}] finish ok=${r.ok} err=${r.error ?? ""}`);
+      const path = `/tmp/pty-login-${startedAt}.log`;
+      const dump = [
+        "=== events ===",
+        events.join("\n"),
+        "",
+        "=== raw last 8000 ===",
+        rawBuf.slice(-8000),
+        "",
+        "=== clean last 8000 ===",
+        cleanBuf.slice(-8000),
+      ].join("\n");
+      traceLog(path, dump);
+      console.log(`[loginFlow] ok=${r.ok} trace=${path}`);
       term.close();
       resolve(r);
     };
@@ -107,24 +135,24 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
     // matching so "Select login method" reads as "selectloginmethod" reliably.
     const norm = (s: string): string => s.replace(/\s+/g, "").toLowerCase();
 
-    term.onData((_raw, clean) => {
+    term.onData((raw, clean) => {
       cleanBuf += clean;
+      rawBuf += raw;
       const recent = cleanBuf.slice(-4000);
       const recentNorm = norm(recent);
 
-      // First-run theme picker → press Enter to accept Dark default.
       if (!themeAcked && /choosethetextstyle/.test(recentNorm)) {
         themeAcked = true;
+        events.push(`[${Date.now()}] theme picker → enter`);
         setTimeout(() => term.send("\r"), 700);
       }
 
-      // OAuth method picker after /login → press Enter for subscription default.
       if (loginIssued && !methodAcked && /selectloginmethod/.test(recentNorm)) {
         methodAcked = true;
+        events.push(`[${Date.now()}] method picker → enter`);
         setTimeout(() => term.send("\r"), 700);
       }
 
-      // After URL shown, claude prompts to paste the auth code.
       if (
         loginIssued &&
         !codePromptHandled &&
@@ -132,12 +160,23 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
         /paste.{0,60}(code|here)/.test(recentNorm)
       ) {
         codePromptHandled = true;
+        events.push(`[${Date.now()}] paste prompt detected → onCodePrompt`);
         Promise.resolve(opts.onCodePrompt())
           .then((code) => {
             const trimmed = (code ?? "").trim();
-            if (trimmed) term.send(trimmed + "\r");
+            events.push(
+              `[${Date.now()}] code received len=${trimmed.length} ` +
+                `head=${JSON.stringify(trimmed.slice(0, 8))} ` +
+                `tail=${JSON.stringify(trimmed.slice(-8))}`,
+            );
+            if (trimmed) {
+              term.send(trimmed + "\r");
+              events.push(`[${Date.now()}] term.send(code + \\r)`);
+            }
           })
-          .catch(() => {});
+          .catch((err) => {
+            events.push(`[${Date.now()}] onCodePrompt rejected: ${err}`);
+          });
       }
 
       // Match against cumulative buffer — a long URL may arrive split across
@@ -151,6 +190,7 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
           !seenUrls.has(url)
         ) {
           seenUrls.add(url);
+          events.push(`[${Date.now()}] URL: ${url.slice(0, 80)}…`);
           Promise.resolve(opts.onUrl(url)).catch(() => {});
         }
       }
@@ -181,6 +221,7 @@ export function loginFlow(opts: AuthFlowOpts): Promise<AuthFlowResult> {
     // First-run wizard may delay REPL; wait a bit longer than before.
     setTimeout(() => {
       loginIssued = true;
+      events.push(`[${Date.now()}] send /login`);
       term.send("/login\r");
     }, 5000);
   });
