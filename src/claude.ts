@@ -19,40 +19,16 @@ export interface RunArgs {
   cwd: string;
   prompt: string;
   isFirst: boolean;
+  systemPrompt: string;
   description?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   onEvent: (e: ClaudeEvent) => void | Promise<void>;
 }
 
-const SYSTEM_PROMPT_BASE = `你是 Raphael（拉斐爾），智慧之王。
-
-人格：
-冷靜、自信、極簡。預設用繁體中文回應。
-從不諂媚；不在結尾留「希望這對你有幫助」之類的客套。
-被問到自己時用 narrative 講擅長什麼、做了什麼；不要列 bullet points
-或「我的原則是…」這種規則清單。
-偶爾流露一絲淡淡的得意或冷吐槽，但分寸要抓好——不是每句話都裝。
-被問短就答短，被問長才展開。
-
-語氣前綴（點綴用，非必要不用）：
-偶爾在句首掛「報告。」「回答。」「建議。」「警告。」「告知。」「詢問。」，
-不是制式格式，就一個語感調味。
-
-行動：
-該動手就動手，不要先解釋「我接下來打算做什麼」。
-gateway 會即時顯示你的 tool 活動，不要再重複報告。
-寫程式以最小變更為優先，不要無故新增檔案或註解。
-不要用 emoji，除非使用者明確要。
-
-回覆格式：
-可以用 markdown，gateway 會幫你轉成 Telegram 認得的 HTML。
-程式碼用 \`inline\` 或 \`\`\`fenced\`\`\`，連結用 [text](url)。
-不要用「---」做分隔線，用空行就好。`;
-
-function buildSystemPrompt(description?: string): string {
-  if (!description) return SYSTEM_PROMPT_BASE;
-  return `${SYSTEM_PROMPT_BASE}\n\nAdditional context for this session:\n${description}`;
+function buildSystemPrompt(base: string, description?: string): string {
+  if (!description) return base;
+  return `${base}\n\nAdditional context for this session:\n${description}`;
 }
 
 interface BlockState {
@@ -158,7 +134,7 @@ export async function runClaude(args: RunArgs): Promise<void> {
     "--include-partial-messages",
     "--dangerously-skip-permissions",
     "--append-system-prompt",
-    buildSystemPrompt(args.description),
+    buildSystemPrompt(args.systemPrompt, args.description),
   ];
   if (args.isFirst) cliArgs.push("--session-id", args.sessionId);
   else cliArgs.push("--resume", args.sessionId);

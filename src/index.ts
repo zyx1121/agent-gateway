@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { config } from "./config.js";
 import { probeInit, probeUsage } from "./claude.js";
 import * as ses from "./session.js";
-import * as r from "./raphael.js";
+import r from "./personas/index.js";
 import { runTurn } from "./runner.js";
 
 const BOOT_AT = Date.now();
@@ -332,7 +332,7 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 
-console.log("[boot] Raphael online.");
+console.log(`[boot] ${r.displayName} online.`);
 await bot.start({
   drop_pending_updates: true,
   onStart: (me) => console.log(`[boot] @${me.username} ready.`),

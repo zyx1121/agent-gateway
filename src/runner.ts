@@ -1,7 +1,7 @@
 import type { Context } from "grammy";
 import { runClaude, type ClaudeEvent } from "./claude.js";
 import * as ses from "./session.js";
-import * as r from "./raphael.js";
+import r from "./personas/index.js";
 
 export const TURN_TIMEOUT_MS = 10 * 60_000;
 const TELEGRAM_EDIT_THROTTLE_MS = 500;
@@ -160,6 +160,7 @@ export async function runTurn(
       cwd: active.cwd,
       prompt,
       isFirst,
+      systemPrompt: r.systemPrompt,
       description: active.description,
       signal: ac.signal,
       timeoutMs: TURN_TIMEOUT_MS,

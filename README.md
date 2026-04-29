@@ -1,15 +1,24 @@
 ```
-██████╗  █████╗ ██████╗ ██╗  ██╗ █████╗ ███████╗██╗
-██╔══██╗██╔══██╗██╔══██╗██║  ██║██╔══██╗██╔════╝██║
-██████╔╝███████║██████╔╝███████║███████║█████╗  ██║
-██╔══██╗██╔══██║██╔═══╝ ██╔══██║██╔══██║██╔══╝  ██║
-██║  ██║██║  ██║██║     ██║  ██║██║  ██║███████╗███████╗
-╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝
+ █████╗  ██████╗ ███████╗███╗   ██╗████████╗     ██████╗  █████╗ ████████╗
+██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝    ██╔════╝ ██╔══██╗╚══██╔══╝
+███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║       ██║  ███╗███████║   ██║
+██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║       ██║   ██║██╔══██║   ██║
+██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║       ╚██████╔╝██║  ██║   ██║
+╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝        ╚═════╝ ╚═╝  ╚═╝   ╚═╝
+
+███████╗██╗    ██╗ █████╗ ██╗   ██╗
+██╔════╝██║    ██║██╔══██╗╚██╗ ██╔╝
+█████╗  ██║ █╗ ██║███████║ ╚████╔╝
+██╔══╝  ██║███╗██║██╔══██║  ╚██╔╝
+███████╗╚███╔███╔╝██║  ██║   ██║
+╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝   ╚═╝
 ```
 
-# Raphael
+# agent-gateway
 
-A Telegram ↔ Claude Code agent gateway. Stuffs the entirety of Claude Code (filesystem, shell, MCP, skills, subagents) into a Telegram chat — wearing the persona of 智慧之王・拉斐爾 (Wisdom King Raphael, from *Tensura*).
+A Telegram ↔ Claude Code agent gateway. Stuffs the entirety of Claude Code (filesystem, shell, MCP, skills, subagents) into a Telegram chat — wearing the persona of your choice.
+
+Ships with **Raphael** (智慧之王・拉斐爾, from *Tensura*) as the default persona. Want a different character? Drop a new module in `src/personas/` and point `PERSONA=` at it.
 
 ## Architecture
 
@@ -23,8 +32,15 @@ A Telegram ↔ Claude Code agent gateway. Stuffs the entirety of Claude Code (fi
                               ├─ stream-json parser
                               ├─ markdown → Telegram HTML
                               ├─ session manager (file-based)
+                              ├─ persona dispatch (system prompt + UX layer)
                               └─ pm2 daemon
 ```
+
+Three layers:
+
+- **core** — bot loop, session manager, claude spawner, stream parser. Persona-agnostic.
+- **persona** — system prompt + Telegram UX (banners, tags, tool-call narration). Swappable per deploy via `PERSONA=`.
+- **skills** — optional capability bundles you can mount into a persona (PVE control, etc). Wired in upcoming releases.
 
 Each Telegram session maps to a Claude Code session id. Every turn spawns one `claude -p --resume <id>`; stream-json events get parsed and forwarded to Telegram in real time — tool calls, text deltas, usage stats.
 
@@ -44,7 +60,6 @@ Each Telegram session maps to a Claude Code session id. Every turn spawns one `c
 | `/help` | Command reference |
 | `/new <name> [--in <path>] [--desc <text>]` | Create a new agent session. `--in` to mount an existing dir as cwd; `--desc` to inject role context |
 | `/list` | All sessions (▶ = active), with turn count and last-active timestamp |
-| `/use <sid8>` | Switch active session |
 | `/resume [sid8]` | Wake up a parked session. No arg → inline keyboard picker |
 | `/clear` | Park the active session (non-destructive; resumable) |
 | `/delete [sid8]` | Permanently delete. No arg → picker |
@@ -54,7 +69,7 @@ Each Telegram session maps to a Claude Code session id. Every turn spawns one `c
 | `/skills` | Available Claude Code skills |
 | `/usage` | Subscription usage bars (current session / week all / week Sonnet) |
 
-Attachments: drop a photo or file into the chat — gets downloaded to the active session's cwd, and Raphael is told the path.
+Attachments: drop a photo or file into the chat — gets downloaded to the active session's cwd, and the persona is told the path.
 
 ## Getting Started
 
@@ -73,11 +88,11 @@ Attachments: drop a photo or file into the chat — gets downloaded to the activ
 ### 2. Install + configure
 
 ```bash
-git clone https://github.com/zyx1121/raphael.git ~/agent-gateway
+git clone https://github.com/zyx1121/agent-gateway.git ~/agent-gateway
 cd ~/agent-gateway
 npm install
 cp .env.example .env
-# Edit .env: TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS
+# Edit .env: TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, PERSONA
 mkdir -p logs ~/agents
 npm run build
 ```
@@ -102,6 +117,7 @@ Open your bot in Telegram and `/start` — you should see the boot banner.
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | ✓ | — | Token from @BotFather |
 | `ALLOWED_USER_IDS` | ✓ | — | Comma-separated Telegram user ids allowed to talk; everyone else is rejected |
+| `PERSONA` | | `raphael` | Which persona module under `src/personas/` to load |
 | `CLAUDE_BIN` | | `claude` | Full path to the `claude` binary (use absolute path to avoid PATH headaches) |
 | `AGENT_HOME` | | `$HOME/agents` | Root dir for per-session working directories |
 | `SESSIONS_FILE` | | `./sessions.json` | Where session metadata is persisted |
@@ -110,12 +126,33 @@ Open your bot in Telegram and `/start` — you should see the boot banner.
 
 ```
 src/
-├── index.ts        Bot entry: commands, attachment handling, turn loop
-├── config.ts       env loader, allow-list parser
-├── session.ts      Per-user session manager (in-memory + file persist)
-├── claude.ts       claude -p spawning, stream-json parsing, probe helpers
-└── raphael.ts      Rendering layer (HTML escaping, Wisdom-King flavor)
+├── index.ts              Bot entry: commands, attachment handling, turn loop
+├── config.ts             env loader, allow-list parser, persona selector
+├── session.ts            Per-user session manager (in-memory + file persist)
+├── claude.ts             claude -p spawning, stream-json parsing, probe helpers
+├── runner.ts             Turn loop (one prompt → stream events → Telegram)
+└── personas/
+    ├── index.ts          Runtime persona dispatch
+    └── raphael.ts        Default persona (system prompt + UX rendering)
 ```
+
+## Personas
+
+A persona is a TypeScript module under `src/personas/` exporting:
+
+- `id` — short identifier (matches `PERSONA=`)
+- `displayName` — human-readable (used in boot logs, banners)
+- `systemPrompt` — appended to every `claude -p` turn
+- All the UX rendering functions consumed by `index.ts` and `runner.ts` (tags, banners, help text, tool-call narration, error messages, mcp/skills/usage formatters, markdown→HTML, message splitter)
+
+To add a new persona:
+
+1. Copy `src/personas/raphael.ts` → `src/personas/<name>.ts`
+2. Customize `id`, `displayName`, `systemPrompt`, and any UX text you want different
+3. Register it in `src/personas/index.ts`
+4. Set `PERSONA=<name>` in `.env`
+
+The bundled **raphael** persona: calm, confident, occasionally dryly amused. Sprinkles two-character prefixes (`報告。` / `回答。` / `建議。` / `警告。` / `告知。` / `詢問。`) — but not every line. No emoji. No "hope this helps".
 
 ## Implementation Notes
 
@@ -162,7 +199,7 @@ ssh -t user@server claude
 # Inside the TUI: /mcp → pick the server → walk through OAuth
 ```
 
-Long-term fix would be migrating to `@anthropic-ai/claude-agent-sdk` with one persistent process per session (not done yet).
+Long-term plan: a PTY-based dual-rail mode — interactive (login / `claude mcp add`) drives a persistent claude REPL via `node-pty`, production turns stay on `-p`. Coming in a future release.
 
 ### `/usage` is scraped from the TUI
 
@@ -174,17 +211,13 @@ To prevent two messages on the same session from spawning two concurrent `claude
 
 ### System prompt injection
 
-Every turn appends `--append-system-prompt <SYSTEM_PROMPT_BASE>` (defined in `src/claude.ts`). If the session was created with `--desc`, that text is appended to the base prompt as additional session context.
+Every turn appends `--append-system-prompt <persona.systemPrompt>` (defined per-persona under `src/personas/`). If the session was created with `--desc`, that text is appended to the persona prompt as additional session context.
 
 ## Deploy notes
 
 - pm2 in cluster mode (single instance); restart auto-restores sessions from `sessions.json`
 - If you're on a PVE/VM setup, install `iptables-persistent` so port-forwarding rules survive reboot
 - `chmod 600 .env`
-
-## Persona
-
-Raphael, the Wisdom King. Calm, confident, occasionally dryly amused. Sprinkles two-character prefixes (`報告。` / `回答。` / `建議。` / `警告。` / `告知。` / `詢問。`) — but not every line. No emoji. No "hope this helps".
 
 ## License
 

@@ -1,8 +1,19 @@
 {
   "name": "agent-gateway",
-  "version": "0.1.0",
-  "description": "Telegram → Claude Code agent gateway (Raphael)",
+  "version": "0.2.0",
+  "description": "Telegram → Claude Code agent gateway. Bring your own persona.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zyx1121/agent-gateway.git"
+  },
+  "keywords": [
+    "telegram",
+    "claude-code",
+    "agent",
+    "gateway",
+    "bot"
+  ],
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
