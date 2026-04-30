@@ -149,6 +149,15 @@ export function deleteByPrefix(
   return { kind: "found", session: target };
 }
 
+export function deleteAll(uid: number): number {
+  const s = ensure(uid);
+  const n = s.sessions.length;
+  s.sessions = [];
+  s.activeId = null;
+  if (n > 0) markDirty();
+  return n;
+}
+
 export function switchTo(
   uid: number,
   prefix: string,

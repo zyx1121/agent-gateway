@@ -55,6 +55,11 @@ export function deletedSession(name: string, sid8: string): string {
   return `${b(">> deleted")} ${esc(name)} ${code(sid8)}`;
 }
 
+export function deletedAll(count: number): string {
+  if (count === 0) return `${b("!!")} nothing to delete`;
+  return `${b(">> deleted all")} ${count} session${count === 1 ? "" : "s"}`;
+}
+
 const fmtAgo = (ts: number): string => {
   const sec = Math.floor((Date.now() - ts) / 1000);
   if (sec < 60) return `${sec}s ago`;
@@ -141,7 +146,7 @@ export function help(): string {
     `${code("/list")}      all sessions (* = active)`,
     `${code("/resume [sid8]")}  resume / switch; no arg → picker`,
     `${code("/clear")}     park current session`,
-    `${code("/delete [sid8]")}  delete; no arg → picker`,
+    `${code("/delete [sid8|all]")}  delete one / all; no arg → picker`,
     `${code("/cancel")}    interrupt running turn`,
     `${code("/status")}    bot + active session info`,
     `${code("/mcp")}       registered MCP servers + auth status`,

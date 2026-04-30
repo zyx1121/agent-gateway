@@ -72,6 +72,9 @@ function buildPicker(
   for (const row of rows) {
     kb.text(`${row.name}  ·  ${row.sid8}`, `${action}:${row.sid8}`).row();
   }
+  if (action === "delete" && rows.length > 1) {
+    kb.text(`!! delete all (${rows.length})`, `delete:__all__`).row();
+  }
   kb.text("x cancel", `cancel:${action}`);
   return kb;
 }
@@ -144,6 +147,10 @@ bot.command("resume", async (ctx) => {
 bot.command("delete", async (ctx) => {
   const arg = ctx.match?.trim();
   const uid = ctx.from!.id;
+  if (arg === "all") {
+    const n = ses.deleteAll(uid);
+    return reply(ctx, msg.deletedAll(n));
+  }
   if (arg) {
     const result = ses.deleteByPrefix(uid, arg);
     if (result.kind === "found")
@@ -333,8 +340,13 @@ bot.callbackQuery(/^resume:(.+)$/, async (ctx) => {
 
 bot.callbackQuery(/^delete:(.+)$/, async (ctx) => {
   const sid8 = ctx.match[1];
-  const result = ses.deleteByPrefix(ctx.from!.id, sid8);
   await ctx.answerCallbackQuery();
+  if (sid8 === "__all__") {
+    const n = ses.deleteAll(ctx.from!.id);
+    await ctx.editMessageText(msg.deletedAll(n).replace(/<[^>]+>/g, ""));
+    return;
+  }
+  const result = ses.deleteByPrefix(ctx.from!.id, sid8);
   if (result.kind !== "found") {
     await ctx.editMessageText(msg.notFound(sid8).replace(/<[^>]+>/g, ""));
     return;
