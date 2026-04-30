@@ -5,7 +5,6 @@ import { config } from "./config.js";
 export interface AgentSession {
   id: string;
   name: string;
-  description?: string;
   cwd: string;
   createdAt: number;
   lastActivityAt: number;
@@ -39,7 +38,6 @@ export async function loadAll(): Promise<void> {
     for (const [k, v] of Object.entries(parsed)) {
       for (const s of v.sessions) {
         s.lastActivityAt ??= s.createdAt;
-        s.description ??= undefined;
         s.initialized ??= s.turnCount > 0;
       }
       state.set(Number(k), v);
@@ -95,7 +93,6 @@ export function activeSession(uid: number): AgentSession | null {
 
 export interface CreateOpts {
   cwdOverride?: string;
-  description?: string;
 }
 
 export function createSession(
@@ -105,12 +102,13 @@ export function createSession(
 ): AgentSession {
   const s = ensure(uid);
   const id = randomUUID();
-  const cwd = opts.cwdOverride ?? `${config.agentHome}/${uid}/${id}`;
+  // Default cwd = $HOME so Claude Code auto-loads ~/CLAUDE.md as the agent's
+  // soul. Override with --in <path> when working inside a specific project.
+  const cwd = opts.cwdOverride ?? process.env.HOME ?? "/";
   const now = Date.now();
   const session: AgentSession = {
     id,
     name,
-    description: opts.description,
     cwd,
     createdAt: now,
     lastActivityAt: now,

@@ -2,7 +2,7 @@ import type { Context } from "grammy";
 import { runClaude, type ClaudeEvent } from "./claude.js";
 import * as ses from "./session.js";
 import { logTurn } from "./turnlog.js";
-import r from "./personas/index.js";
+import * as msg from "./messages.js";
 
 export const TURN_TIMEOUT_MS = 10 * 60_000;
 const TELEGRAM_EDIT_THROTTLE_MS = 500;
@@ -24,17 +24,17 @@ export async function runTurn(
 ): Promise<void> {
   const uid = ctx.from!.id;
   const active = ses.activeSession(uid);
-  if (!active) return reply(r.noActive());
+  if (!active) return reply(msg.noActive());
 
   if (Buffer.byteLength(prompt, "utf8") > MAX_PROMPT_BYTES) {
     return reply(
-      r.toolFail(
-        `prompt 太長（${Buffer.byteLength(prompt, "utf8")} bytes，上限 ${MAX_PROMPT_BYTES}）`,
+      msg.toolFail(
+        `prompt too large (${Buffer.byteLength(prompt, "utf8")} bytes, max ${MAX_PROMPT_BYTES})`,
       ),
     );
   }
 
-  if (ses.isBusy(active.id)) return reply(r.busy());
+  if (ses.isBusy(active.id)) return reply(msg.busy());
 
   const isFirst = !active.initialized;
   ses.bumpTurn(uid);
@@ -64,7 +64,7 @@ export async function runTurn(
     // streaming path we just defer until the next tick.
     if (seg.msgId === null) {
       if (!force) return;
-      if (seg.text) await reply(r.finalAnswer(seg.text));
+      if (seg.text) await reply(msg.finalAnswer(seg.text));
       return;
     }
     if (seg.pendingEdit) {
@@ -73,8 +73,8 @@ export async function runTurn(
     }
     seg.lastEditAt = Date.now();
     const html = force
-      ? r.finalAnswer(seg.text || "…")
-      : r.md.esc(seg.text || "…") + " ▍";
+      ? msg.finalAnswer(seg.text || "…")
+      : msg.md.esc(seg.text || "…") + " _";
     try {
       await ctx.api.editMessageText(ctx.chat!.id, seg.msgId, html, {
         parse_mode: "HTML",
@@ -107,11 +107,11 @@ export async function runTurn(
   const onEvent = async (e: ClaudeEvent) => {
     switch (e.kind) {
       case "init":
-        // Claude 端確認 session-id；下一輪以後 isFirst=false
+        // Claude side acknowledged the session-id; subsequent turns resume.
         ses.markInitialized(active.id);
         break;
       case "tool_use":
-        await reply(r.toolCall(e.name, e.input));
+        await reply(msg.toolCall(e.name, e.input));
         void logTurn({
           ts: Date.now(),
           chatId,
@@ -123,7 +123,7 @@ export async function runTurn(
         });
         break;
       case "tool_result":
-        if (e.isError) await reply(r.toolFail(e.content));
+        if (e.isError) await reply(msg.toolFail(e.content));
         break;
       case "stream_text_start": {
         // Set the seg synchronously BEFORE awaiting telegram so a delta that
@@ -180,7 +180,7 @@ export async function runTurn(
         break;
       case "usage":
         ses.addUsage(uid, e.inputTokens, e.outputTokens);
-        await reply(r.turnComplete(e));
+        await reply(msg.turnComplete(e));
         void logTurn({
           ts: Date.now(),
           chatId,
@@ -193,7 +193,7 @@ export async function runTurn(
         });
         break;
       case "error":
-        await reply(r.toolFail(e.message));
+        await reply(msg.toolFail(e.message));
         break;
       case "done":
         for (const idx of segs.keys()) await flushSeg(idx, true);
@@ -215,14 +215,12 @@ export async function runTurn(
       cwd: active.cwd,
       prompt,
       isFirst,
-      systemPrompt: r.systemPrompt,
-      description: active.description,
       signal: ac.signal,
       timeoutMs: TURN_TIMEOUT_MS,
       onEvent,
     });
   } catch (err: any) {
-    await reply(r.toolFail(String(err?.message ?? err)));
+    await reply(msg.toolFail(String(err?.message ?? err)));
     void logTurn({
       ts: Date.now(),
       chatId,

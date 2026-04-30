@@ -21,9 +21,8 @@ const csvIds = (name: string): Set<number> => {
 export const config = {
   botToken: required("TELEGRAM_BOT_TOKEN"),
   allowedUsers: csvIds("ALLOWED_USER_IDS"),
-  persona: process.env.PERSONA ?? "raphael",
+  agentName: process.env.AGENT_NAME ?? "agent",
   claudeBin: process.env.CLAUDE_BIN ?? "claude",
-  agentHome: process.env.AGENT_HOME ?? `${process.env.HOME}/agents`,
   sessionsFile:
     process.env.SESSIONS_FILE ??
     `${process.env.HOME}/agent-gateway/sessions.json`,

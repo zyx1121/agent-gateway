@@ -6,7 +6,7 @@ import { probeInit, probeUsage } from "./claude.js";
 import * as ses from "./session.js";
 import * as update from "./update.js";
 import * as pty from "./pty.js";
-import r from "./personas/index.js";
+import * as msg from "./messages.js";
 import { runTurn } from "./runner.js";
 import { tailTurns } from "./turnlog.js";
 
@@ -18,14 +18,14 @@ await ses.loadAll();
 bot.use(async (ctx, next) => {
   const uid = ctx.from?.id;
   if (!uid || !config.allowedUsers.has(uid)) {
-    if (ctx.message) await ctx.reply(r.denied().replace(/<[^>]+>/g, ""));
+    if (ctx.message) await ctx.reply(msg.denied().replace(/<[^>]+>/g, ""));
     return;
   }
   await next();
 });
 
 async function reply(ctx: Context, text: string): Promise<void> {
-  for (const chunk of r.splitForTelegram(text)) {
+  for (const chunk of msg.splitForTelegram(text)) {
     try {
       await ctx.reply(chunk, { parse_mode: "HTML" });
     } catch (err: any) {
@@ -40,7 +40,6 @@ const replyTo = (ctx: Context) => (text: string) => reply(ctx, text);
 interface NewArgs {
   name: string;
   inPath?: string;
-  description?: string;
 }
 
 function parseNewArgs(raw: string): NewArgs {
@@ -51,23 +50,18 @@ function parseNewArgs(raw: string): NewArgs {
 
   let name = `agent-${Date.now().toString(36).slice(-4)}`;
   let inPath: string | undefined;
-  let description: string | undefined;
   const positional: string[] = [];
 
   for (let idx = 0; idx < tokens.length; idx++) {
     const t = tokens[idx];
     if (t === "--in") inPath = tokens[++idx];
-    else if (t === "--desc") description = tokens[++idx];
     else positional.push(t);
   }
   if (positional.length > 0) name = positional[0];
-  if (positional.length > 1 && !description) {
-    description = positional.slice(1).join(" ");
-  }
   if (inPath?.startsWith("~")) {
     inPath = inPath.replace(/^~/, process.env.HOME ?? "");
   }
-  return { name, inPath, description };
+  return { name, inPath };
 }
 
 function buildPicker(
@@ -78,32 +72,31 @@ function buildPicker(
   for (const row of rows) {
     kb.text(`${row.name}  ·  ${row.sid8}`, `${action}:${row.sid8}`).row();
   }
-  kb.text("✕ 取消", `cancel:${action}`);
+  kb.text("x cancel", `cancel:${action}`);
   return kb;
 }
 
 bot.command("start", async (ctx) => {
-  await reply(ctx, r.startupBanner());
+  await reply(ctx, msg.startupBanner());
 });
 
 bot.command("help", async (ctx) => {
-  await reply(ctx, r.help());
+  await reply(ctx, msg.help());
 });
 
 bot.command("new", async (ctx) => {
   const args = parseNewArgs(ctx.match?.trim() ?? "");
   const s = ses.createSession(ctx.from!.id, args.name, {
     cwdOverride: args.inPath,
-    description: args.description,
   });
-  await reply(ctx, r.newSession(s.name, ses.sid8(s.id), s.cwd));
+  await reply(ctx, msg.newSession(s.name, ses.sid8(s.id), s.cwd));
 });
 
 bot.command("clear", async (ctx) => {
   const parked = ses.clearActive(ctx.from!.id);
   await reply(
     ctx,
-    parked ? r.parkedSession(parked.name, ses.sid8(parked.id)) : r.noActive(),
+    parked ? msg.parkedSession(parked.name, ses.sid8(parked.id)) : msg.noActive(),
   );
 });
 
@@ -113,7 +106,7 @@ bot.command("list", async (ctx) => {
   const active = ses.activeSession(uid);
   await reply(
     ctx,
-    r.listSessions(
+    msg.listSessions(
       all.map((s) => ({
         name: s.name,
         sid8: ses.sid8(s.id),
@@ -127,9 +120,9 @@ bot.command("list", async (ctx) => {
 
 async function handleSwitch(ctx: Context, arg: string): Promise<void> {
   const result = ses.switchTo(ctx.from!.id, arg);
-  if (result.kind === "found") return reply(ctx, r.switched(result.session.name));
-  if (result.kind === "ambiguous") return reply(ctx, r.ambiguous(arg, result.count));
-  return reply(ctx, r.notFound(arg));
+  if (result.kind === "found") return reply(ctx, msg.switched(result.session.name));
+  if (result.kind === "ambiguous") return reply(ctx, msg.ambiguous(arg, result.count));
+  return reply(ctx, msg.notFound(arg));
 }
 
 bot.command("resume", async (ctx) => {
@@ -141,8 +134,8 @@ bot.command("resume", async (ctx) => {
   const picks = all
     .filter((s) => s.id !== active?.id)
     .map((s) => ({ name: s.name, sid8: ses.sid8(s.id) }));
-  if (picks.length === 0) return reply(ctx, r.pickerEmpty("resume"));
-  await ctx.reply(r.pickerPrompt("resume"), {
+  if (picks.length === 0) return reply(ctx, msg.pickerEmpty("resume"));
+  await ctx.reply(msg.pickerPrompt("resume"), {
     parse_mode: "HTML",
     reply_markup: buildPicker("resume", picks),
   });
@@ -156,16 +149,16 @@ bot.command("delete", async (ctx) => {
     if (result.kind === "found")
       return reply(
         ctx,
-        r.deletedSession(result.session.name, ses.sid8(result.session.id)),
+        msg.deletedSession(result.session.name, ses.sid8(result.session.id)),
       );
     if (result.kind === "ambiguous")
-      return reply(ctx, r.ambiguous(arg, result.count));
-    return reply(ctx, r.notFound(arg));
+      return reply(ctx, msg.ambiguous(arg, result.count));
+    return reply(ctx, msg.notFound(arg));
   }
   const all = ses.listSessions(uid);
   const picks = all.map((s) => ({ name: s.name, sid8: ses.sid8(s.id) }));
-  if (picks.length === 0) return reply(ctx, r.pickerEmpty("delete"));
-  await ctx.reply(r.pickerPrompt("delete"), {
+  if (picks.length === 0) return reply(ctx, msg.pickerEmpty("delete"));
+  await ctx.reply(msg.pickerPrompt("delete"), {
     parse_mode: "HTML",
     reply_markup: buildPicker("delete", picks),
   });
@@ -173,27 +166,27 @@ bot.command("delete", async (ctx) => {
 
 bot.command("cancel", async (ctx) => {
   const active = ses.activeSession(ctx.from!.id);
-  if (!active) return reply(ctx, r.noActive());
+  if (!active) return reply(ctx, msg.noActive());
   const ok = ses.cancel(active.id);
-  await reply(ctx, ok ? r.cancelled() : r.nothingToCancel());
+  await reply(ctx, ok ? msg.cancelled() : msg.nothingToCancel());
 });
 
 bot.command("mcp", async (ctx) => {
   await ctx.replyWithChatAction("typing").catch(() => {});
   const init = await probeInit();
-  await reply(ctx, r.mcpList(init.mcpServers));
+  await reply(ctx, msg.mcpList(init.mcpServers));
 });
 
 bot.command("skills", async (ctx) => {
   await ctx.replyWithChatAction("typing").catch(() => {});
   const init = await probeInit();
-  await reply(ctx, r.skillsList(init.skills));
+  await reply(ctx, msg.skillsList(init.skills));
 });
 
 bot.command("usage", async (ctx) => {
   await ctx.replyWithChatAction("typing").catch(() => {});
   const bars = await probeUsage();
-  await reply(ctx, r.usageBars(bars));
+  await reply(ctx, msg.usageBars(bars));
 });
 
 // chat_id → resolver for the next text message (claude OAuth code paste-back).
@@ -202,7 +195,7 @@ const awaitingCodeByChat = new Map<number, (code: string) => void>();
 bot.command("login", async (ctx) => {
   if (!ctx.chat) return;
   const chatId = ctx.chat.id;
-  await reply(ctx, r.loginBegin());
+  await reply(ctx, msg.loginBegin());
 
   // Fire-and-forget. grammy dispatches updates sequentially per chat; if we
   // awaited loginFlow here (it blocks up to 5 min waiting for the OAuth URL
@@ -210,21 +203,21 @@ bot.command("login", async (ctx) => {
   // never get dispatched — deadlock by self-blocking.
   void pty
     .loginFlow({
-      onUrl: (url) => reply(ctx, r.loginUrl(url)),
+      onUrl: (url) => reply(ctx, msg.loginUrl(url)),
       onCodePrompt: () =>
         new Promise<string>((resolve) => {
           awaitingCodeByChat.set(chatId, resolve);
-          reply(ctx, r.loginCodePrompt()).catch(() => {});
+          reply(ctx, msg.loginCodePrompt()).catch(() => {});
         }),
     })
     .then((result) => {
       awaitingCodeByChat.delete(chatId);
-      if (result.ok) return reply(ctx, r.loginOk(result.tail));
-      return reply(ctx, r.loginFail(result.error ?? "unknown", result.tail));
+      if (result.ok) return reply(ctx, msg.loginOk(result.tail));
+      return reply(ctx, msg.loginFail(result.error ?? "unknown", result.tail));
     })
     .catch((err) => {
       awaitingCodeByChat.delete(chatId);
-      reply(ctx, r.loginFail(String(err?.message ?? err), "")).catch(
+      reply(ctx, msg.loginFail(String(err?.message ?? err), "")).catch(
         () => {},
       );
     });
@@ -235,7 +228,7 @@ async function runUpdate(
   target: "gateway" | "claude",
 ): Promise<void> {
   await ctx.replyWithChatAction("typing").catch(() => {});
-  await reply(ctx, r.updateBegin(target));
+  await reply(ctx, msg.updateBegin(target));
   try {
     const result =
       target === "gateway"
@@ -243,15 +236,15 @@ async function runUpdate(
         : await update.updateClaude();
     await reply(
       ctx,
-      r.updateResult(target, result.before, result.after, result.changed, result.log),
+      msg.updateResult(target, result.before, result.after, result.changed, result.log),
     );
     if (target === "gateway" && result.changed) {
-      await reply(ctx, r.gatewayReloading());
+      await reply(ctx, msg.gatewayReloading());
       update.reloadProcess("agent-gateway");
     }
   } catch (err: any) {
-    const msg = String(err?.stderr || err?.stdout || err?.message || err);
-    await reply(ctx, r.updateError(target, msg));
+    const errMsg = String(err?.stderr || err?.stdout || err?.message || err);
+    await reply(ctx, msg.updateError(target, errMsg));
   }
 }
 
@@ -261,12 +254,12 @@ bot.command("update", async (ctx) => {
     await runUpdate(ctx, arg);
     return;
   }
-  if (arg) return reply(ctx, r.updateUnknown(arg));
+  if (arg) return reply(ctx, msg.updateUnknown(arg));
 
   const kb = new InlineKeyboard()
     .text("gateway", "update:gateway")
     .text("claude", "update:claude");
-  await ctx.reply(r.updatePicker(), {
+  await ctx.reply(msg.updatePicker(), {
     parse_mode: "HTML",
     reply_markup: kb,
   });
@@ -284,7 +277,7 @@ bot.command("status", async (ctx) => {
   const active = ses.activeSession(uid);
   await reply(
     ctx,
-    r.status({
+    msg.status({
       uptimeSec: Math.floor((Date.now() - BOOT_AT) / 1000),
       activeName: active?.name ?? null,
       activeSid8: active ? ses.sid8(active.id) : null,
@@ -308,18 +301,18 @@ bot.command("trace", async (ctx) => {
     const sid = (t.sessionId ?? "").slice(0, 8);
     const head = `${ts}  ${sid}  <b>${t.kind}</b>`;
     if (t.kind === "start") {
-      lines.push(`${head}\n  prompt: ${r.md.code((t.prompt ?? "").slice(0, 200))}`);
+      lines.push(`${head}\n  prompt: ${msg.md.code((t.prompt ?? "").slice(0, 200))}`);
     } else if (t.kind === "tool") {
-      lines.push(`${head}  ${r.md.code(t.toolName ?? "?")}`);
+      lines.push(`${head}  ${msg.md.code(t.toolName ?? "?")}`);
     } else if (t.kind === "answer") {
       const preview = (t.text ?? "").slice(0, 200).replace(/\n/g, " ↵ ");
-      lines.push(`${head}\n  ${r.md.esc(preview)}`);
+      lines.push(`${head}\n  ${msg.md.esc(preview)}`);
     } else if (t.kind === "end") {
       lines.push(
         `${head}  ${t.durationMs}ms · ${t.inputTokens} in · ${t.outputTokens} out`,
       );
     } else if (t.kind === "error") {
-      lines.push(`${head}\n  ${r.md.esc((t.error ?? "").slice(0, 300))}`);
+      lines.push(`${head}\n  ${msg.md.esc((t.error ?? "").slice(0, 300))}`);
     }
   }
   await reply(ctx, lines.join("\n\n"));
@@ -330,10 +323,10 @@ bot.callbackQuery(/^resume:(.+)$/, async (ctx) => {
   const result = ses.switchTo(ctx.from!.id, sid8);
   await ctx.answerCallbackQuery();
   if (result.kind !== "found") {
-    await ctx.editMessageText(r.notFound(sid8).replace(/<[^>]+>/g, ""));
+    await ctx.editMessageText(msg.notFound(sid8).replace(/<[^>]+>/g, ""));
     return;
   }
-  await ctx.editMessageText(`${r.tag.report}切換對象 → ${result.session.name}`, {
+  await ctx.editMessageText(`<b>>></b> ${result.session.name}`, {
     parse_mode: "HTML",
   });
 });
@@ -343,11 +336,11 @@ bot.callbackQuery(/^delete:(.+)$/, async (ctx) => {
   const result = ses.deleteByPrefix(ctx.from!.id, sid8);
   await ctx.answerCallbackQuery();
   if (result.kind !== "found") {
-    await ctx.editMessageText(r.notFound(sid8).replace(/<[^>]+>/g, ""));
+    await ctx.editMessageText(msg.notFound(sid8).replace(/<[^>]+>/g, ""));
     return;
   }
   await ctx.editMessageText(
-    `${r.tag.report}個體 ${result.session.name} (${sid8}) 已抹消。`,
+    `<b>>> deleted</b> ${result.session.name} (${sid8})`,
     { parse_mode: "HTML" },
   );
 });
@@ -364,7 +357,7 @@ async function handleAttachment(
 ): Promise<string | null> {
   const active = ses.activeSession(ctx.from!.id);
   if (!active) {
-    await reply(ctx, r.noActive());
+    await reply(ctx, msg.noActive());
     return null;
   }
   await mkdir(active.cwd, { recursive: true });
@@ -372,14 +365,14 @@ async function handleAttachment(
   const url = `https://api.telegram.org/file/bot${config.botToken}/${file.file_path}`;
   const resp = await fetch(url);
   if (!resp.ok) {
-    await reply(ctx, r.toolFail(`download failed: ${resp.status}`));
+    await reply(ctx, msg.toolFail(`download failed: ${resp.status}`));
     return null;
   }
   const buf = Buffer.from(await resp.arrayBuffer());
   const safeName = filename.replace(/[^\w.\- ]+/g, "_");
   const target = join(active.cwd, safeName);
   await writeFile(target, buf);
-  await reply(ctx, r.attachmentReceived(safeName, target));
+  await reply(ctx, msg.attachmentReceived(safeName, target));
   return target;
 }
 
@@ -388,8 +381,8 @@ bot.on("message:photo", async (ctx) => {
   if (!photo) return;
   const filename = `photo-${Date.now()}.jpg`;
   const path = await handleAttachment(ctx, photo.file_id, filename);
-  const caption = ctx.message.caption ?? "看一下這張圖。";
-  if (path) await runTurn(ctx, `${caption}\n\n圖片路徑：${path}`, replyTo(ctx));
+  const caption = ctx.message.caption ?? "take a look at this image.";
+  if (path) await runTurn(ctx, `${caption}\n\nimage path: ${path}`, replyTo(ctx));
 });
 
 bot.on("message:document", async (ctx) => {
@@ -399,8 +392,8 @@ bot.on("message:document", async (ctx) => {
     doc.file_id,
     doc.file_name ?? `file-${Date.now()}`,
   );
-  const caption = ctx.message.caption ?? "看一下這個檔案。";
-  if (path) await runTurn(ctx, `${caption}\n\n檔案路徑：${path}`, replyTo(ctx));
+  const caption = ctx.message.caption ?? "take a look at this file.";
+  if (path) await runTurn(ctx, `${caption}\n\nfile path: ${path}`, replyTo(ctx));
 });
 
 bot.on("message:text", async (ctx) => {
@@ -413,7 +406,7 @@ bot.on("message:text", async (ctx) => {
     if (codeResolver) {
       awaitingCodeByChat.delete(ctx.chat.id);
       codeResolver(ctx.message.text);
-      await reply(ctx, r.loginCodeReceived());
+      await reply(ctx, msg.loginCodeReceived());
       return;
     }
   }
@@ -429,21 +422,21 @@ bot.catch((err) => {
 });
 
 await bot.api.setMyCommands([
-  { command: "start", description: "啟動畫面" },
-  { command: "help", description: "指令一覽" },
-  { command: "new", description: "創設新個體" },
-  { command: "list", description: "所有個體" },
-  { command: "resume", description: "喚回個體（無參數跳選單）" },
-  { command: "clear", description: "停泊當前個體" },
-  { command: "delete", description: "抹消個體（無參數跳選單）" },
-  { command: "cancel", description: "中斷進行中的演算" },
-  { command: "status", description: "系統狀態" },
-  { command: "mcp", description: "MCP server 一覽與認證狀態" },
-  { command: "skills", description: "可用 skills" },
-  { command: "usage", description: "Claude Code 訂閱用量" },
-  { command: "update", description: "升級 gateway / claude" },
-  { command: "login", description: "PTY-based claude OAuth 登入" },
-  { command: "trace", description: "近期 turn 日誌 (預設 10 筆，/trace 30 可調)" },
+  { command: "start", description: "boot banner" },
+  { command: "help", description: "command list" },
+  { command: "new", description: "create a new session" },
+  { command: "list", description: "all sessions" },
+  { command: "resume", description: "resume / switch (no arg → picker)" },
+  { command: "clear", description: "park current session" },
+  { command: "delete", description: "delete session (no arg → picker)" },
+  { command: "cancel", description: "interrupt running turn" },
+  { command: "status", description: "system status" },
+  { command: "mcp", description: "MCP servers + auth" },
+  { command: "skills", description: "available skills" },
+  { command: "usage", description: "subscription usage" },
+  { command: "update", description: "upgrade gateway / claude" },
+  { command: "login", description: "PTY-based claude OAuth" },
+  { command: "trace", description: "recent turn-log events (default 10)" },
 ]);
 
 let shuttingDown = false;
@@ -473,7 +466,7 @@ process.on("unhandledRejection", (err) => {
   process.exit(1);
 });
 
-console.log(`[boot] ${r.displayName} online.`);
+console.log(`[boot] agent-gateway · ${config.agentName} online.`);
 bot
   .start({
     drop_pending_updates: true,

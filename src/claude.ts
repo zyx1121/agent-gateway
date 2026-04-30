@@ -19,16 +19,9 @@ export interface RunArgs {
   cwd: string;
   prompt: string;
   isFirst: boolean;
-  systemPrompt: string;
-  description?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   onEvent: (e: ClaudeEvent) => void | Promise<void>;
-}
-
-function buildSystemPrompt(base: string, description?: string): string {
-  if (!description) return base;
-  return `${base}\n\nAdditional context for this session:\n${description}`;
 }
 
 interface BlockState {
@@ -125,6 +118,9 @@ const empty = () => ({ skills: [] as string[], mcpServers: [] as { name: string;
 export async function runClaude(args: RunArgs): Promise<void> {
   await mkdir(args.cwd, { recursive: true });
 
+  // No --append-system-prompt: agent persona lives in cwd/CLAUDE.md, which
+  // Claude Code reads natively. Single source of truth, ssh-editable, no
+  // double-injection drift.
   const cliArgs = [
     "-p",
     args.prompt,
@@ -133,8 +129,6 @@ export async function runClaude(args: RunArgs): Promise<void> {
     "--verbose",
     "--include-partial-messages",
     "--dangerously-skip-permissions",
-    "--append-system-prompt",
-    buildSystemPrompt(args.systemPrompt, args.description),
   ];
   if (args.isFirst) cliArgs.push("--session-id", args.sessionId);
   else cliArgs.push("--resume", args.sessionId);
