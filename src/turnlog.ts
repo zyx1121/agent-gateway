@@ -1,7 +1,7 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdir } from "node:fs/promises";
 
 // dist/turnlog.js → repo root → repo/logs/turns.jsonl
 const REPO_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,7 +37,7 @@ export async function logTurn(rec: TurnRecord): Promise<void> {
       text: truncate(rec.text),
       error: truncate(rec.error, 1000),
     };
-    appendFileSync(LOG_PATH, JSON.stringify(sanitized) + "\n");
+    await appendFile(LOG_PATH, JSON.stringify(sanitized) + "\n");
   } catch {
     /* don't let logging break a turn */
   }
