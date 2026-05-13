@@ -1,17 +1,17 @@
 {
-  "name": "agent-gateway",
+  "name": "outpost",
   "version": "0.2.0",
-  "description": "Telegram → Claude Code agent gateway. Bring your own persona.",
+  "description": "Run Claude Code as a daemon on a server you don't sit in front of. Talk to it from your phone.",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/zyx1121/agent-gateway.git"
+    "url": "https://github.com/zyx1121/outpost.git"
   },
   "keywords": [
     "telegram",
     "claude-code",
     "agent",
-    "gateway",
+    "remote",
     "bot"
   ],
   "main": "dist/index.js",

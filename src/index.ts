@@ -372,7 +372,7 @@ process.on("unhandledRejection", (err) => {
   process.exit(1);
 });
 
-console.log(`[boot] agent-gateway · ${config.agentName} online.`);
+console.log(`[boot] outpost · ${config.agentName} online.`);
 bot
   .start({
     drop_pending_updates: true,

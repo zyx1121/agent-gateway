@@ -47,7 +47,7 @@ export const config = {
   claudeBin: process.env.CLAUDE_BIN ?? "claude",
   sessionsFile:
     process.env.SESSIONS_FILE ??
-    `${process.env.HOME}/agent-gateway/sessions.json`,
+    `${process.env.HOME}/outpost/sessions.json`,
   // Idle timeout — kill if no stdout event for this long.
   // Long-running turns that keep streaming tool calls stay alive; only
   // genuinely stuck agents get reaped.

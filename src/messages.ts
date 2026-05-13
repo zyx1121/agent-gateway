@@ -1,5 +1,5 @@
 /**
- * Framework messages for agent-gateway.
+ * Framework messages for outpost.
  *
  * Style philosophy: gateway speaks like a retro terminal — plain English,
  * pure ASCII, no flourish. The "personality" of an agent comes from the
@@ -33,7 +33,7 @@ export const md = { esc, code, codeBlock, b, i };
 // ── boot ────────────────────────────────────────────────────────────
 
 export function startupBanner(): string {
-  return `${b("agent-gateway")} ${i("·")} ${esc(config.agentName)} ${i("·")} ready.`;
+  return `${b("outpost")} ${i("·")} ${esc(config.agentName)} ${i("·")} ready.`;
 }
 
 // ── session lifecycle ───────────────────────────────────────────────
@@ -135,7 +135,7 @@ export function pickerEmpty(action: "resume" | "delete"): string {
 
 export function help(): string {
   return [
-    `${b("agent-gateway · commands")}`,
+    `${b("outpost · commands")}`,
     "",
     `${code("/start")}     boot banner`,
     `${code("/help")}      this`,
