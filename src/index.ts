@@ -2,13 +2,10 @@ import { Bot, Context, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "./config.js";
-import { probeInit, probeUsage } from "./claude.js";
 import * as ses from "./session.js";
-import * as update from "./update.js";
 import * as pty from "./pty.js";
 import * as msg from "./messages.js";
 import { runTurn } from "./runner.js";
-import { tailTurns } from "./turnlog.js";
 
 const BOOT_AT = Date.now();
 
@@ -178,24 +175,6 @@ bot.command("cancel", async (ctx) => {
   await reply(ctx, ok ? msg.cancelled() : msg.nothingToCancel());
 });
 
-bot.command("mcp", async (ctx) => {
-  await ctx.replyWithChatAction("typing").catch(() => {});
-  const init = await probeInit();
-  await reply(ctx, msg.mcpList(init.mcpServers));
-});
-
-bot.command("skills", async (ctx) => {
-  await ctx.replyWithChatAction("typing").catch(() => {});
-  const init = await probeInit();
-  await reply(ctx, msg.skillsList(init.skills));
-});
-
-bot.command("usage", async (ctx) => {
-  await ctx.replyWithChatAction("typing").catch(() => {});
-  const bars = await probeUsage();
-  await reply(ctx, msg.usageBars(bars));
-});
-
 // chat_id → resolver for the next text message (claude OAuth code paste-back).
 const awaitingCodeByChat = new Map<number, (code: string) => void>();
 
@@ -230,55 +209,6 @@ bot.command("login", async (ctx) => {
     });
 });
 
-async function runUpdate(
-  ctx: Context,
-  target: "gateway" | "claude",
-): Promise<void> {
-  await ctx.replyWithChatAction("typing").catch(() => {});
-  await reply(ctx, msg.updateBegin(target));
-  try {
-    const result =
-      target === "gateway"
-        ? await update.updateGateway()
-        : await update.updateClaude();
-    await reply(
-      ctx,
-      msg.updateResult(target, result.before, result.after, result.changed, result.log),
-    );
-    if (target === "gateway" && result.changed) {
-      await reply(ctx, msg.gatewayReloading());
-      update.reloadProcess("agent-gateway");
-    }
-  } catch (err: any) {
-    const errMsg = String(err?.stderr || err?.stdout || err?.message || err);
-    await reply(ctx, msg.updateError(target, errMsg));
-  }
-}
-
-bot.command("update", async (ctx) => {
-  const arg = (ctx.match?.trim() ?? "").toLowerCase();
-  if (arg === "gateway" || arg === "claude") {
-    await runUpdate(ctx, arg);
-    return;
-  }
-  if (arg) return reply(ctx, msg.updateUnknown(arg));
-
-  const kb = new InlineKeyboard()
-    .text("gateway", "update:gateway")
-    .text("claude", "update:claude");
-  await ctx.reply(msg.updatePicker(), {
-    parse_mode: "HTML",
-    reply_markup: kb,
-  });
-});
-
-bot.callbackQuery(/^update:(gateway|claude)$/, async (ctx) => {
-  const target = ctx.match[1] as "gateway" | "claude";
-  await ctx.answerCallbackQuery();
-  await ctx.editMessageReplyMarkup({}).catch(() => {});
-  await runUpdate(ctx, target);
-});
-
 bot.command("status", async (ctx) => {
   const uid = ctx.from!.id;
   const active = ses.activeSession(uid);
@@ -292,37 +222,6 @@ bot.command("status", async (ctx) => {
       busy: !!(active && ses.isBusy(active.id)),
     }),
   );
-});
-
-bot.command("trace", async (ctx) => {
-  const arg = (ctx.match?.trim() ?? "10").toLowerCase();
-  const n = Math.max(1, Math.min(50, parseInt(arg, 10) || 10));
-  const records = tailTurns(n);
-  if (records.length === 0) {
-    await reply(ctx, "<i>no turns logged yet</i>");
-    return;
-  }
-  const lines: string[] = [`<b>last ${records.length} events</b>`];
-  for (const t of records) {
-    const ts = new Date(t.ts).toISOString().slice(11, 19);
-    const sid = (t.sessionId ?? "").slice(0, 8);
-    const head = `${ts}  ${sid}  <b>${t.kind}</b>`;
-    if (t.kind === "start") {
-      lines.push(`${head}\n  prompt: ${msg.md.code((t.prompt ?? "").slice(0, 200))}`);
-    } else if (t.kind === "tool") {
-      lines.push(`${head}  ${msg.md.code(t.toolName ?? "?")}`);
-    } else if (t.kind === "answer") {
-      const preview = (t.text ?? "").slice(0, 200).replace(/\n/g, " ↵ ");
-      lines.push(`${head}\n  ${msg.md.esc(preview)}`);
-    } else if (t.kind === "end") {
-      lines.push(
-        `${head}  ${t.durationMs}ms · ${t.inputTokens} in · ${t.outputTokens} out`,
-      );
-    } else if (t.kind === "error") {
-      lines.push(`${head}\n  ${msg.md.esc((t.error ?? "").slice(0, 300))}`);
-    }
-  }
-  await reply(ctx, lines.join("\n\n"));
 });
 
 bot.callbackQuery(/^resume:(.+)$/, async (ctx) => {
@@ -443,12 +342,7 @@ await bot.api.setMyCommands([
   { command: "delete", description: "delete session (no arg → picker)" },
   { command: "cancel", description: "interrupt running turn" },
   { command: "status", description: "system status" },
-  { command: "mcp", description: "MCP servers + auth" },
-  { command: "skills", description: "available skills" },
-  { command: "usage", description: "subscription usage" },
-  { command: "update", description: "upgrade gateway / claude" },
   { command: "login", description: "PTY-based claude OAuth" },
-  { command: "trace", description: "recent turn-log events (default 10)" },
 ]);
 
 let shuttingDown = false;

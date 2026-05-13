@@ -30,8 +30,6 @@ const i = (s: string): string => `<i>${s}</i>`;
 
 export const md = { esc, code, codeBlock, b, i };
 
-export const displayName: string = config.agentName;
-
 // ── boot ────────────────────────────────────────────────────────────
 
 export function startupBanner(): string {
@@ -149,12 +147,7 @@ export function help(): string {
     `${code("/delete [sid8|all]")}  delete one / all; no arg → picker`,
     `${code("/cancel")}    interrupt running turn`,
     `${code("/status")}    bot + active session info`,
-    `${code("/mcp")}       registered MCP servers + auth status`,
-    `${code("/skills")}    available Claude Code skills`,
-    `${code("/usage")}     subscription usage bars`,
-    `${code("/update <gateway|claude>")}  upgrade gateway or Claude Code`,
     `${code("/login")}     PTY-bridged claude OAuth (URL forwarded here)`,
-    `${code("/trace [N]")}  last N turn-log events (default 10)`,
     "",
     i(`attachments: drop a photo/file → downloaded to active cwd, path passed to agent.`),
   ].join("\n");
@@ -234,54 +227,6 @@ export function attachmentReceived(filename: string, savedPath: string): string 
   return `${b(">> attached")} ${code(filename)} -> ${code(savedPath)}`;
 }
 
-// ── probes ──────────────────────────────────────────────────────────
-
-function section(title: string, lines: string[]): string {
-  return [`${b(title)}`, ...lines.map((l) => `   ${l}`)].join("\n");
-}
-
-export function mcpList(servers: { name: string; status: string }[]): string {
-  if (servers.length === 0) return section("mcp servers", ["(none)"]);
-  const lines = servers.map((s) => {
-    const icon =
-      s.status === "connected"
-        ? "+"
-        : s.status === "needs-auth"
-          ? "!"
-          : s.status === "disabled"
-            ? "x"
-            : "-";
-    return `${icon}  ${esc(s.name)}  ${i(esc(s.status))}`;
-  });
-  return section(`mcp servers (${servers.length})`, lines);
-}
-
-export function skillsList(skills: string[]): string {
-  if (skills.length === 0) return section("skills", ["(none)"]);
-  const lines = skills.map((s) => `-  ${code(s)}`);
-  return section(`skills (${skills.length})`, lines);
-}
-
-function bar(percent: number, width = 24): string {
-  const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)));
-  return "#".repeat(filled) + ".".repeat(width - filled);
-}
-
-export function usageBars(
-  bars: { label: string; percent: number | null; resetsAt: string | null }[],
-): string {
-  if (bars.length === 0) return section("usage", ["(no data)"]);
-  const lines: string[] = [];
-  for (const x of bars) {
-    const pct = x.percent ?? 0;
-    lines.push(`${esc(x.label)}`);
-    lines.push(`${code(bar(pct))}  ${pct}%`);
-    if (x.resetsAt) lines.push(i(`resets ${esc(x.resetsAt)}`));
-    lines.push("");
-  }
-  return section("usage", lines);
-}
-
 export function turnComplete(opts: {
   inputTokens: number;
   outputTokens: number;
@@ -289,42 +234,6 @@ export function turnComplete(opts: {
 }): string {
   const sec = (opts.durationMs / 1000).toFixed(1);
   return `${i(`done · ${sec}s · ${opts.inputTokens} in · ${opts.outputTokens} out`)}`;
-}
-
-// ── update flow ─────────────────────────────────────────────────────
-
-export function updatePicker(): string {
-  return `pick update target:`;
-}
-
-export function updateUnknown(target: string): string {
-  return `${b("!!")} unknown target: ${code(esc(target))} — available: ${code("gateway")} | ${code("claude")}`;
-}
-
-export function updateBegin(target: string): string {
-  return `${b(`>> updating ${target}…`)}`;
-}
-
-export function updateResult(
-  target: string,
-  before: string,
-  after: string,
-  changed: boolean,
-  log: string,
-): string {
-  const head = changed
-    ? `${b(target)} updated: ${code(esc(before))} -> ${code(esc(after))}`
-    : `${b(target)} already current: ${code(esc(after))}`;
-  if (!log.trim()) return head;
-  return `${head}\n${codeBlock(log.slice(-1500))}`;
-}
-
-export function updateError(target: string, error: string): string {
-  return `${b("!!")} ${b(target)} update failed: ${esc(error.slice(0, 800))}`;
-}
-
-export function gatewayReloading(): string {
-  return `${i("reloading via pm2…")}`;
 }
 
 // ── login flow (PTY OAuth) ──────────────────────────────────────────

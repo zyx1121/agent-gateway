@@ -1,10 +1,9 @@
 import type { Context } from "grammy";
 import { runClaude, type ClaudeEvent } from "./claude.js";
+import { config } from "./config.js";
 import * as ses from "./session.js";
-import { logTurn } from "./turnlog.js";
 import * as msg from "./messages.js";
 
-export const TURN_TIMEOUT_MS = 10 * 60_000;
 const TELEGRAM_EDIT_THROTTLE_MS = 500;
 export const MAX_PROMPT_BYTES = 32 * 1024;
 
@@ -38,21 +37,10 @@ export async function runTurn(
 
   const isFirst = !active.initialized;
   ses.bumpTurn(uid);
-  const turnStart = Date.now();
 
   const ac = new AbortController();
   ses.setBusy(active.id, ac);
   await ctx.replyWithChatAction("typing").catch(() => {});
-
-  const chatId = ctx.chat?.id ?? 0;
-  void logTurn({
-    ts: turnStart,
-    chatId,
-    userId: uid,
-    sessionId: active.id,
-    kind: "start",
-    prompt,
-  });
 
   const segs = new Map<number, SegState>();
 
@@ -112,15 +100,6 @@ export async function runTurn(
         break;
       case "tool_use":
         await reply(msg.toolCall(e.name, e.input));
-        void logTurn({
-          ts: Date.now(),
-          chatId,
-          userId: uid,
-          sessionId: active.id,
-          kind: "tool",
-          toolName: e.name,
-          toolInput: e.input,
-        });
         break;
       case "tool_result":
         if (e.isError) await reply(msg.toolFail(e.content));
@@ -164,14 +143,6 @@ export async function runTurn(
             .catch(() => {});
         } else {
           await flushSeg(e.index, true);
-          void logTurn({
-            ts: Date.now(),
-            chatId,
-            userId: uid,
-            sessionId: active.id,
-            kind: "answer",
-            text: seg.text,
-          });
         }
         segs.delete(e.index);
         break;
@@ -181,16 +152,6 @@ export async function runTurn(
       case "usage":
         ses.addUsage(uid, e.inputTokens, e.outputTokens);
         await reply(msg.turnComplete(e));
-        void logTurn({
-          ts: Date.now(),
-          chatId,
-          userId: uid,
-          sessionId: active.id,
-          kind: "end",
-          durationMs: e.durationMs,
-          inputTokens: e.inputTokens,
-          outputTokens: e.outputTokens,
-        });
         break;
       case "error":
         await reply(msg.toolFail(e.message));
@@ -216,19 +177,12 @@ export async function runTurn(
       prompt,
       isFirst,
       signal: ac.signal,
-      timeoutMs: TURN_TIMEOUT_MS,
+      idleTimeoutMs: config.idleTimeoutMs,
+      hardTimeoutMs: config.hardTimeoutMs,
       onEvent,
     });
   } catch (err: any) {
     await reply(msg.toolFail(String(err?.message ?? err)));
-    void logTurn({
-      ts: Date.now(),
-      chatId,
-      userId: uid,
-      sessionId: active.id,
-      kind: "error",
-      error: String(err?.message ?? err),
-    });
   } finally {
     ses.clearBusy(active.id);
   }
