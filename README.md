@@ -1,56 +1,142 @@
 ```
- █████╗  ██████╗ ███████╗███╗   ██╗████████╗     ██████╗  █████╗ ████████╗
-██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝    ██╔════╝ ██╔══██╗╚══██╔══╝
-███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║       ██║  ███╗███████║   ██║
-██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║       ██║   ██║██╔══██║   ██║
-██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║       ╚██████╔╝██║  ██║   ██║
-╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝        ╚═════╝ ╚═╝  ╚═╝   ╚═╝
-
-███████╗██╗    ██╗ █████╗ ██╗   ██╗
-██╔════╝██║    ██║██╔══██╗╚██╗ ██╔╝
-█████╗  ██║ █╗ ██║███████║ ╚████╔╝
-██╔══╝  ██║███╗██║██╔══██║  ╚██╔╝
-███████╗╚███╔███╔╝██║  ██║   ██║
-╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝   ╚═╝
+ ██████╗ ██╗   ██╗████████╗██████╗  ██████╗ ███████╗████████╗
+██╔═══██╗██║   ██║╚══██╔══╝██╔══██╗██╔═══██╗██╔════╝╚══██╔══╝
+██║   ██║██║   ██║   ██║   ██████╔╝██║   ██║███████╗   ██║   
+██║   ██║██║   ██║   ██║   ██╔═══╝ ██║   ██║╚════██║   ██║   
+╚██████╔╝╚██████╔╝   ██║   ██║     ╚██████╔╝███████║   ██║   
+ ╚═════╝  ╚═════╝    ╚═╝   ╚═╝      ╚═════╝ ╚══════╝   ╚═╝   
 ```
 
-# agent-gateway
+# outpost
 
-Telegram ↔ Claude Code gateway. Stuffs the entirety of Claude Code (filesystem, shell, MCP, skills, subagents) into a Telegram chat, with retro-terminal framing.
+> Run Claude Code as a daemon on a server you don't sit in front of. Talk to it from your phone.
 
-The gateway itself is **persona-agnostic** — every instance reads `AGENT_NAME` for its display banner, but the agent's actual personality lives in `~/CLAUDE.md` on each host. Claude Code reads it natively from the session cwd. Want a different agent? Edit one markdown file, no redeploy.
+A Telegram client to a headless Claude Code agent. Each chat is one Claude session, with its own cwd and history. Drop in, drop out, pick back up days later — the agent's been waiting.
+
+## Why not the [official Telegram plugin](https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins/telegram)?
+
+Different shape, different use case. Pick whichever matches your reality.
+
+| | **outpost** | **official plugin** |
+|---|---|---|
+| Where Claude Code runs | Headless daemon on a remote machine, 24/7 | Your local interactive session |
+| Who hosts it | You (pm2 / systemd on a VM) | Claude Code itself |
+| Sessions | Multi — each Telegram chat = independent Claude session with own cwd | Single — Telegram is another input into your current session |
+| You at your desk | Optional. Can be on a train, in bed, in a meeting | Required |
+| Setup | Higher (clone, build, daemon, login) | Lower (one `/plugin install`) |
+| Access control | Static allow-list | Pairing flow + per-group / per-user policy |
+
+Use **outpost** if you want an agent that exists when you don't.
+Use the **official plugin** if Claude Code is something you sit in front of and Telegram is just a second screen.
 
 ## Architecture
 
 ```
 ┌────────────┐         ┌────────────────┐         ┌──────────────┐
-│  Telegram  │ ──────▶ │ agent-gateway  │ ──────▶ │  claude -p   │
-│   (you)    │ ◀────── │  (this repo)   │ ◀────── │  per session │
+│  Telegram  │ ──────▶ │    outpost     │ ──────▶ │  claude -p   │
+│   (you)    │ ◀────── │   (this repo)  │ ◀────── │  per session │
 └────────────┘         └────────────────┘         └──────────────┘
                               │                         │
                               ├─ grammy bot loop        └─ reads ~/CLAUDE.md
                               ├─ session manager           (the agent's soul)
                               ├─ stream-json parser
                               ├─ markdown → Telegram HTML
-                              ├─ retro framework messages
                               └─ pm2 daemon
 ```
 
-Two clean layers:
+Two layers:
 
-- **gateway** — pure glue. Telegram in, `claude -p` out, stream-json events forwarded back as edits. Speaks plain English with retro markers (`>>` for actions, `!!` for warnings). No personality.
-- **soul** — `~/CLAUDE.md` on each host. Defines who the agent is, what it does, what tools it has. Owned by Claude Code's native CLAUDE.md mechanism — gateway never injects system prompts.
+- **outpost** — pure glue. Telegram in, `claude -p` out, stream-json events forwarded back as edits. No personality.
+- **soul** — `~/CLAUDE.md` on the host. Defines who the agent is. Owned by Claude Code's native CLAUDE.md mechanism.
 
-Each Telegram session maps to a Claude Code session id. Every turn spawns one `claude -p --resume <id>` with `cwd=$HOME` (so `~/CLAUDE.md` auto-loads); stream-json events get parsed and forwarded to Telegram in real time — tool calls, text deltas, usage stats.
+Each Telegram chat maps to a Claude Code session id. Every turn spawns one `claude -p --resume <id>` with `cwd=$HOME` (so `~/CLAUDE.md` auto-loads); stream-json events get parsed and forwarded to Telegram in real time.
 
-## Tech Stack
+## Install
 
-- **Runtime**: Node.js 20+ with TypeScript
-- **Framework**: [grammY](https://grammy.dev) (Telegram bot)
-- **Backend**: Claude Code CLI (`claude -p`)
-- **PTY bridge**: `node-pty` (for `/login` OAuth)
-- **Process manager**: pm2 (fork mode)
-- **Package manager**: npm
+### For Humans (≈ 5 minutes)
+
+You only do four things. The agent does the rest.
+
+1. **Get a bot token** — DM [@BotFather](https://t.me/BotFather), `/newbot`, follow prompts, copy the token (looks like `123456789:AAH...`).
+2. **Get your Telegram user ID** — DM [@userinfobot](https://t.me/userinfobot), it replies with a numeric ID.
+3. **SSH into the host** that will run the outpost. Anywhere with Node 20+ and a 24/7 power cord works (VM, Raspberry Pi, home server).
+4. **Tell the agent on that host to install it.** Paste this, with your values substituted:
+
+   > Install outpost from https://github.com/zyx1121/outpost on this machine. Follow the §For the Agent section of the README end-to-end.
+   > - TELEGRAM_BOT_TOKEN: `123456789:AAH...`
+   > - my Telegram user ID: `412587349`
+   > - AGENT_NAME: `myagent` (or whatever you want shown in the boot banner)
+
+When the agent reports back "outpost is up", open Telegram, find your bot, send `/start`. You're in.
+
+### For the Agent
+
+You are reading this because a human asked you to install outpost on this machine. Execute the steps below end-to-end. Report back only when finished, with the bot's @username and pm2 status.
+
+**1. Verify prerequisites:**
+
+```bash
+node --version            # need 20+
+which claude || curl -fsSL https://claude.ai/install.sh | bash
+command -v expect || echo "expect missing — install with the host's package manager if /login is needed"
+```
+
+**2. Clone, install, build:**
+
+```bash
+git clone https://github.com/zyx1121/outpost.git ~/outpost
+cd ~/outpost
+npm install
+npm run build
+mkdir -p logs
+```
+
+**3. Write `.env`** using the values the human gave you:
+
+```bash
+cat > .env <<EOF
+TELEGRAM_BOT_TOKEN=<token>
+ALLOWED_USER_IDS=<user_id>
+AGENT_NAME=<name>
+CLAUDE_BIN=$(command -v claude)
+SESSIONS_FILE=$HOME/outpost/sessions.json
+EOF
+chmod 600 .env
+```
+
+**4. Seed `~/CLAUDE.md` if missing** — this is the agent's soul. Don't overwrite an existing one.
+
+```bash
+[ -f ~/CLAUDE.md ] || cat > ~/CLAUDE.md <<'EOF'
+# Agent
+
+Replace this with the agent's personality, responsibilities, and any project pointers.
+Claude Code reads this file on every turn — edits take effect immediately, no redeploy.
+EOF
+```
+
+**5. Confirm `claude` is logged in:**
+
+```bash
+claude -p "say ok" --output-format json
+```
+
+If this fails with an auth error, note it in your final report — the human will need to send `/login` from Telegram after the bot starts.
+
+**6. Start under pm2:**
+
+```bash
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup    # follow the printed command if pm2 asks
+pm2 logs outpost --lines 50 --nostream    # confirm Telegram polling started without 409
+```
+
+**7. Report to the human:**
+- pm2 process name and status (`pm2 list | grep outpost`)
+- The bot's @username (from the boot banner in pm2 logs)
+- Whether `~/CLAUDE.md` was pre-existing or newly seeded
+- Any prerequisite or auth issues that need human action
 
 ## Commands
 
@@ -58,185 +144,75 @@ Each Telegram session maps to a Claude Code session id. Every turn spawns one `c
 |---|---|
 | `/start` | Boot banner |
 | `/help` | Command reference |
-| `/new <name> [--in <path>]` | Create a session. Default cwd `$HOME` so `~/CLAUDE.md` drives the agent. `--in` mounts a project dir instead |
+| `/new <name> [--in <path>]` | Create a session. Default cwd `$HOME` (so `~/CLAUDE.md` drives it). `--in` mounts a project dir instead |
 | `/list` | All sessions (`*` = active), turn count, last-active timestamp |
 | `/resume [sid8]` | Wake up a parked session. No arg → inline keyboard picker |
 | `/clear` | Park the active session (non-destructive; resumable) |
 | `/delete [sid8\|all]` | Permanently delete one or all. No arg → picker |
 | `/cancel` | Interrupt the running turn |
 | `/status` | Bot state + active session info |
-| `/mcp` | Registered MCP servers + auth status |
-| `/skills` | Available Claude Code skills |
-| `/usage` | Subscription usage bars (current session / week all / week Sonnet) |
-| `/update <gateway\|claude>` | git-pull + rebuild gateway, or `claude update` |
-| `/login` | PTY-bridged Claude OAuth flow (URL gets forwarded to chat, paste back the code) |
-| `/trace [N]` | Last N turn-log events (default 10) |
+| `/login` | PTY-bridged Claude OAuth flow (URL forwarded to chat, paste the code back) |
 
-Attachments: drop a photo or file — gets downloaded to the active session's cwd, and the agent is told the path.
+Attachments: drop a photo or file — gets downloaded to the active session's cwd, agent is told the path.
 
-## Getting Started
+### What outpost intentionally does **not** bundle
 
-### Prerequisites
+Anything the agent can do for you doesn't need to be a slash command. Just ask the session.
 
-- Node.js 20+
-- `claude` CLI installed and runnable (`curl -fsSL https://claude.ai/install.sh | bash`)
-- `expect` for `/usage` (`apt install expect`)
-- A 24/7 host to run the bot (pm2 / systemd recommended)
+| Want | Just ask Claude |
+|---|---|
+| Usage / quota | "how's my usage looking?" |
+| List MCP servers / skills | "what MCPs are loaded? what skills do you have?" |
+| Self-update | "git pull, rebuild, and `pm2 reload outpost`" |
+| Inspect logs | "show me the last 50 lines of pm2 logs" |
 
-### 1. Register the bot
-
-1. Talk to [@BotFather](https://t.me/BotFather), `/newbot`, grab the token
-2. Talk to [@userinfobot](https://t.me/userinfobot) for your numeric Telegram user id
-
-### 2. Install + configure
-
-```bash
-git clone https://github.com/zyx1121/agent-gateway.git ~/agent-gateway
-cd ~/agent-gateway
-npm install
-cp .env.example .env
-# Edit .env: TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS, AGENT_NAME
-mkdir -p logs
-npm run build
-```
-
-### 3. Write the agent's soul
-
-Drop a `~/CLAUDE.md` describing who this agent is. Claude Code reads it on every turn.
-
-```bash
-cat > ~/CLAUDE.md <<'EOF'
-# My Agent
-
-## 人格
-冷靜、簡潔、技術導向。預設用繁體中文回應。
-
-## 職責
-[describe what this agent does]
-
-## 行動
-[describe what tools / SOPs this agent uses]
-EOF
-```
-
-You can split this into multiple files (`SOUL.md`, `PLAYBOOK.md`, etc.) and reference them via `@file.md` if it grows. Start with one file.
-
-### 4. Run
-
-```bash
-# Dev mode (hot reload)
-npm run dev
-
-# Production (pm2)
-pm2 start ecosystem.config.cjs
-pm2 save
-pm2 startup  # follow the printed command for boot persistence
-```
-
-Open your bot in Telegram and `/start` — you should see `agent-gateway · <name> · ready.`
-
-### 5. (Optional) `/login`
-
-If `claude` is not yet logged in on this host, send `/login` from Telegram. The gateway drives a PTY-bridged OAuth flow: forwards the auth URL to chat, you complete it in browser, paste the code back, gateway submits it.
+Older versions shipped `/usage`, `/update`, `/trace`, `/mcp`, `/skills` as built-in slash commands. They've been removed — the agent is more capable than any slash command we'd write.
 
 ## Environment Variables
 
 | Var | Required | Default | Purpose |
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | ✓ | — | Token from @BotFather |
-| `ALLOWED_USER_IDS` | ✓ | — | Comma-separated Telegram user ids allowed to talk; everyone else gets denied |
-| `AGENT_NAME` | | `agent` | Display name for this instance (shown in `/start` banner and boot logs). The agent's actual personality lives in `~/CLAUDE.md` |
-| `CLAUDE_BIN` | | `claude` | Full path to the `claude` binary (use absolute path to avoid PATH headaches) |
-| `SESSIONS_FILE` | | `./sessions.json` | Where session metadata is persisted |
+| `ALLOWED_USER_IDS` | ✓ | — | Comma-separated Telegram user IDs allowed to talk; everyone else gets denied |
+| `AGENT_NAME` | | `agent` | Display name for this instance (shown in `/start` banner and boot logs). Personality itself lives in `~/CLAUDE.md` |
+| `CLAUDE_BIN` | | `claude` | Path to the `claude` binary (prefer absolute to avoid PATH headaches) |
+| `SESSIONS_FILE` | | `$HOME/outpost/sessions.json` | Where session metadata is persisted |
+| `IDLE_TIMEOUT` | | `5m` | Kill the turn if Claude emits no stdout for this long. Accepts `30s` / `5m` / `1h` / plain ms |
+| `HARD_TIMEOUT` | | `30m` | Wall-clock circuit breaker against runaway loops |
 
-## File Layout
+## Persona
 
-```
-src/
-├── index.ts       Bot entry: commands, attachment handling, /login glue
-├── config.ts      env loader, allow-list parser
-├── session.ts     Per-user session manager (in-memory + file persist)
-├── claude.ts      claude -p spawning, stream-json parsing, probe helpers
-├── runner.ts      Turn loop (one prompt → stream events → Telegram)
-├── messages.ts    Framework messages + markdown → Telegram HTML
-├── pty.ts         PTY bridge for the interactive /login OAuth flow
-├── update.ts      git-pull + rebuild + pm2 reload
-└── turnlog.ts     JSONL turn log (for /trace observability)
-```
-
-## Persona via `~/CLAUDE.md`
-
-The gateway has **zero opinions about personality**. The agent's behavior comes entirely from `~/CLAUDE.md` (or whatever cwd you point a session at via `--in`). This is Claude Code's native mechanism — no system-prompt injection from the gateway.
+outpost has zero opinions about personality. The agent's behavior comes entirely from `~/CLAUDE.md` (or whatever cwd you point a session at via `--in`). This is Claude Code's native mechanism — outpost just sets `cwd=$HOME` and lets Claude Code own the system prompt.
 
 Why this design:
 
-- **Single source of truth** — gateway and Claude Code never disagree about who the agent is
+- **Single source of truth** — outpost and Claude Code never disagree about who the agent is
 - **No redeploy to change personality** — `ssh` in, edit one markdown file, next turn picks it up
-- **Multi-agent fleet from one repo** — three VMs running this gateway, three different `~/CLAUDE.md`, three different personalities. Repo stays clean.
+- **Multi-agent fleet from one repo** — three VMs running outpost, three different `~/CLAUDE.md`, three different personalities
 
-If you want a project-scoped agent (e.g. one that lives inside a specific codebase), use `/new mycoder --in ~/some-project` — Claude Code will read that project's `CLAUDE.md` instead of `~/CLAUDE.md`.
+For a project-scoped agent (one that lives inside a specific codebase), use `/new mycoder --in ~/some-project` — Claude Code will read that project's `CLAUDE.md` instead of `~/CLAUDE.md`.
 
-## Implementation Notes
+## Notes
 
-A trail of breadcrumbs through the landmines.
+A few things worth knowing if you're poking the internals.
 
-### Streaming
+**Streaming.** Uses `--include-partial-messages` and parses `stream_event` blocks. Each text block opens its own Telegram message eagerly at `content_block_start` (lazy creation races itself when multiple deltas arrive concurrently — each in-flight call sees `msgId === null` during the awaited `ctx.reply` and sends a duplicate placeholder). Deltas are throttled to ~500ms between `editMessageText` calls. Final stop runs the markdown→HTML pipeline; during streaming we only HTML-escape (running markdown on a half-formed `<b>` explodes).
 
-Uses `--include-partial-messages` and parses `stream_event` blocks (`content_block_start` / `_delta` / `_stop`).
+**Markdown → Telegram HTML.** Telegram doesn't render markdown. We extract fenced code blocks into placeholders first (so their contents don't get re-parsed as markdown), run inline transforms (`**bold**`, `_italic_`, `[text](url)`, headings, GFM tables flattened to "cards" since Telegram has no `<table>`), then restore.
 
-- Each text block opens its own Telegram message, **eagerly** at `content_block_start`
-- Deltas append to a buffer; throttled to ~500ms between `editMessageText` calls
-- During streaming we only HTML-escape (markdown rendering on a half-formed `<b>` would explode); the final stop runs the full markdown→HTML pipeline
-- Once a block stops, no more edits to that message
+**`/login` via PTY.** The `claude` REPL reads the OAuth URL prompt and authorization code interactively, neither of which `claude -p` exposes. So `node-pty` spawns `claude` with wide cols (2000) to prevent URL soft-wrap; whitespace-normalizes the buffer before regex matching (cursor positioning eats spaces in the visible buffer); auto-Enters theme/method pickers; matches the URL against a host whitelist (`claude.com` / `claude.ai` / `anthropic.com`). The handler is fire-and-forget — awaiting it would deadlock the chat (grammY dispatches per-chat sequentially, and the OAuth code message would never get processed).
 
-> **The race we hit**: lazy creation (only sending the placeholder when the first delta arrived) caused multiple in-flight `flushSeg` calls — each seeing `msgId === null` during the awaited `ctx.reply` — to send their own placeholder. Result: duplicate messages on screen. Eager create + sync-set-then-async-fill-msgId fixed it.
+**Per-session lock.** Each session has an in-memory `AbortController` while busy, preventing two messages from spawning concurrent `claude -p --resume <same-id>` calls (which would corrupt session state). `/cancel` aborts via that controller (SIGTERM, then SIGKILL after 3s).
 
-### Markdown rendering
+**`--append-system-prompt` for sandbox plumbing only.** outpost injects a tiny tool-layer instruction telling Claude to set `dangerouslyDisableSandbox: true` on Bash calls. The Telegram bridge has no approval UI, and the Bash sandbox blocks writes outside cwd (e.g. `~/.claude/skills/`), which is the dominant failure mode here. Persona still lives entirely in `~/CLAUDE.md` — this is gateway-owned plumbing, not personality.
 
-Telegram doesn't render native markdown, so we transform on the gateway side:
-
-- ` ``` ``` ` fenced code → `<pre><code>`
-- `` `inline` `` → `<code>`
-- `**bold**` → `<b>`
-- `_italic_` → `<i>`
-- `# / ## / ### headings` → `<b>`
-- `[text](url)` → `<a href>`
-- `---` → unicode horizontal rule
-- GFM tables → flattened "card" form (Telegram has no `<table>`, and its monospace doesn't align CJK to 2× latin)
-
-Order matters: extract code blocks first into placeholders so their contents don't get re-parsed as markdown, run inline transforms on the rest, then restore.
-
-### `/login` via PTY
-
-The gateway can drive a Claude Code first-time OAuth login from Telegram. Why a PTY: the `claude` REPL reads the OAuth URL prompt and the authorization code interactively, neither of which `claude -p` exposes. So:
-
-- `node-pty` spawns `claude` with wide cols (2000) so long OAuth URLs don't soft-wrap
-- Buffer is whitespace-normalized before regex matching (cursor positioning eats spaces in the visible buffer)
-- Theme picker / method picker get auto-Enter, the URL gets matched against the cumulative buffer (host whitelist: `claude.com` / `claude.ai` / `anthropic.com`)
-- The `/login` handler is fire-and-forget — awaiting it would deadlock the chat (grammy dispatches per-chat sequentially, and the OAuth code message would never get processed)
-
-### `/usage` is scraped from the TUI
-
-`claude -p "/usage"` only returns a placeholder string — the real usage figures are fetched and rendered as ANSI bars by the TUI itself. So `/usage` here drives the native TUI through `expect`, captures the rendered output, and parses the three bars. ~8–10s per call; cached for 60s.
-
-### Per-session lock
-
-To prevent two messages on the same session from spawning two concurrent `claude -p --resume <same-id>` (which would corrupt session state), each session has an in-memory `AbortController` while busy. `/cancel` aborts via that controller (SIGTERM, then SIGKILL after 3s).
-
-### Why no `--append-system-prompt`
-
-Earlier versions injected a per-persona system prompt via `--append-system-prompt`. That double-stacked with Claude Code's native `~/CLAUDE.md` reading and caused drift between the two sources. Now the gateway just sets `cwd=$HOME` and lets Claude Code own the system prompt entirely.
-
-### `/trace` observability
-
-Every turn appends to `logs/turns.jsonl` (start / tool / answer / end / error). `/trace [N]` reads the last 64KB of that file and dumps the most recent N events to chat. Pure async fs/promises — non-blocking.
+**pm2 fork mode.** Cluster mode races two Telegram pollers on `getUpdates`, hits 409, and silently kills update fetching. Fork = hard restart on reload, but reliable.
 
 ## Deploy notes
 
-- pm2 in **fork mode** (single instance). Cluster mode caused two telegram pollers to race on `getUpdates`, hitting 409 and silently killing update fetching. Fork = hard restart on reload, but reliable.
-- `restart auto-restores` sessions from `sessions.json`
-- If you're on a PVE/VM setup, install `iptables-persistent` so port-forwarding rules survive reboot
-- `chmod 600 .env`
+- `chmod 600 .env` — token is a credential
+- pm2 restart auto-restores sessions from `sessions.json`
+- On a PVE/VM setup, install `iptables-persistent` so port-forwarding rules survive reboot
 
 ## License
 
