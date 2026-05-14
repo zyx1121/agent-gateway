@@ -25,10 +25,17 @@ export interface Reply {
   text: string;
 }
 
+export interface SystemInject {
+  type: "system_inject";
+  content: string;
+  meta?: Meta;
+}
+
 export interface Ack {
   type: "ack";
-  for: "reply";
+  for: "reply" | "inject";
   ok: boolean;
+  delivered?: boolean;
   error?: string;
 }
 
@@ -111,8 +118,16 @@ export class DaemonSocket {
           continue;
         }
         if (!helloSeen) {
+          if (msg.type === "system_inject") {
+            // One-shot inject: external CLI (e.g. cron) drops a synthetic
+            // inbound for the active channel, gets an ack, socket closes.
+            // No hello / no channel registration — daemon stays bound to its
+            // existing channel.
+            void this.handleInject(sock, msg as SystemInject);
+            return;
+          }
           if (msg.type !== "hello") {
-            console.warn(`[socket] expected hello, got ${msg.type}, closing`);
+            console.warn(`[socket] expected hello or system_inject, got ${msg.type}, closing`);
             sock.destroy();
             return;
           }
@@ -156,6 +171,18 @@ export class DaemonSocket {
       ack = { type: "ack", for: "reply", ok: false, error: String(err?.message ?? err) };
     }
     if (sock.writable) sock.write(JSON.stringify(ack) + "\n");
+  }
+
+  private handleInject(sock: Socket, inj: SystemInject): void {
+    const inbound: Inbound = {
+      type: "inbound",
+      content: inj.content,
+      meta: inj.meta ?? {},
+    };
+    const delivered = this.send(inbound);
+    const ack: Ack = { type: "ack", for: "inject", ok: true, delivered };
+    if (sock.writable) sock.write(JSON.stringify(ack) + "\n");
+    sock.end();
   }
 
   send(msg: Inbound): boolean {
