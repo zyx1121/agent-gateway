@@ -128,6 +128,42 @@ On failure:
 
 The channel returns `'sent'` from the `reply` tool on `ok: true`, otherwise the error string. Claude sees this and can decide whether to retry or surface the failure.
 
+### External → Daemon (CLI injection)
+
+#### `system_inject`
+
+A **one-shot** message from an external process (cron, sidecar, `outpost inject` CLI) that delivers a synthetic `inbound` to the active channel. Differs from `hello`-then-`reply` in that the sender does not register as the channel — it just drops the message and disconnects.
+
+```json
+{
+  "type": "system_inject",
+  "content": "[scheduled] post-close — run snapshot + stop check",
+  "meta": {
+    "chat_id": "system:quant",
+    "user": "cron",
+    "source": "quant-post-close-cron",
+    "ts": "2026-05-14T06:00:00Z"
+  }
+}
+```
+
+- `content` — message body. Becomes the body of the `<channel>` tag claude sees.
+- `meta` — optional `Record<string, string>`. Same key constraints as for `inbound` (lowercase, ascii). `chat_id`'s `system:*` namespace is reserved for synthetic sources — `reply` calls targeting `system:*` ids will fail with `unparseable chat_id` (which is fine; cron messages don't need to be replied to over telegram).
+
+After receiving `system_inject`, the daemon:
+1. Builds an `inbound` event from `content` + `meta`.
+2. Forwards it to the active channel (or buffers if none).
+3. Sends an `ack` (next section).
+4. Closes the socket.
+
+This means `system_inject` connections are short-lived — one message, one ack, gone. The daemon's normal channel binding is unaffected.
+
+```json
+{ "type": "ack", "for": "inject", "ok": true, "delivered": true }
+```
+
+`delivered` is `true` if forwarded to a live channel, `false` if buffered (no channel attached). `ok: false` only happens if the daemon hits an internal error before queuing.
+
 ## Future extensions — not in v0
 
 - `edit` (channel → daemon) — implements `edit_message` MCP tool. Requires the daemon to track outbound Telegram message ids keyed by `chat_id`.

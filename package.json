@@ -15,6 +15,9 @@
     "bot"
   ],
   "main": "dist/index.js",
+  "bin": {
+    "outpost": "dist/cli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p channel/tsconfig.json",
     "start": "node dist/index.js",
