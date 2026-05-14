@@ -73,12 +73,13 @@ export class Supervisor {
       ),
     );
 
-    // Granular allowlist instead of bypass mode — bypass triggers a
-    // warning dialog we can't reliably auto-dismiss (default cursor sits
-    // on "exit", and Down+Enter in current claude TUI doesn't always
-    // pick "accept"). Allowlist all built-in tools + any MCP server's
-    // tools (mcp__<server>__<tool> matches both wildcard styles claude
-    // currently honors).
+    // Granular allowlist. The bypass-mode warning we can't reliably
+    // auto-dismiss, so we enumerate. mcp__outpost-channel__reply MUST
+    // be exact — when claude surfaces it via ToolSearch from the
+    // deferred-tools pool the wildcard `mcp__*` doesn't satisfy the
+    // permission check (verified empirically: bot hangs waiting on
+    // approval). Other MCP servers (`mcp__supabase__*`, etc.) get added
+    // here as they're needed.
     await writeFile(
       `${ws}/.claude/settings.local.json`,
       JSON.stringify(
@@ -98,6 +99,7 @@ export class Supervisor {
               "Task",
               "TodoWrite",
               "NotebookEdit",
+              "mcp__outpost-channel__reply",
               "mcp__*",
             ],
           },
