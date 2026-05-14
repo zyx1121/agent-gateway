@@ -38,23 +38,30 @@ function stopTyping(chatId: number): void {
   typingTimers.delete(chatId);
 }
 
+const preview = (s: string, n = 120): string =>
+  s.length <= n ? s : `${s.slice(0, n)}…(+${s.length - n})`;
+
 const sock = new DaemonSocket(config.socketPath, {
   onHello: (hello) => {
     console.log(
-      `[socket] channel hello protocol=${hello.protocol} pid=${hello.pid} ver=${hello.channel_version}`,
+      `[socket] hello protocol=${hello.protocol} pid=${hello.pid} ver=${hello.channel_version}`,
     );
   },
   onDisconnect: () => console.log("[socket] channel disconnected"),
   onReply: async (reply) => {
     const chatId = decodeChatId(reply.chat_id);
-    if (chatId === null) return { ok: false, error: `unparseable chat_id ${reply.chat_id}` };
+    if (chatId === null) {
+      console.warn(`[reply] unparseable chat_id=${reply.chat_id}`);
+      return { ok: false, error: `unparseable chat_id ${reply.chat_id}` };
+    }
+    console.log(`[reply] ${reply.chat_id} ${reply.text.length}c: ${preview(reply.text)}`);
     stopTyping(chatId);
     try {
       await sendReply(chatId, reply.text);
       return { ok: true };
     } catch (err: any) {
       const desc = String(err?.description ?? err?.message ?? err);
-      console.warn(`[reply] send failed: ${desc}`);
+      console.warn(`[reply] tg send failed: ${desc}`);
       return { ok: false, error: desc };
     }
   },
@@ -136,6 +143,9 @@ function dispatch(ctx: Context, content: string): void {
   const chat = ctx.chat;
   const from = ctx.from;
   if (!chat || !from) return;
+  console.log(
+    `[inbound] tg:${chat.id} ${from.username ?? from.id} ${content.length}c: ${preview(content)}`,
+  );
   startTyping(chat.id);
   const result = dispatchInbound(sock, content, {
     chat_id: encodeChatId(chat.id),
@@ -143,6 +153,7 @@ function dispatch(ctx: Context, content: string): void {
     ts: new Date().toISOString(),
   });
   if (!result.ok) {
+    console.warn(`[inbound] dispatch failed: ${result.error}`);
     stopTyping(chat.id);
     void reply(ctx, msg.toolFail(result.error ?? "dispatch failed"));
   }

@@ -174,7 +174,9 @@ export class Supervisor {
       },
     );
 
-    console.log(`[supervisor] claude spawned pid=${this.term.pid}`);
+    console.log(
+      `[supervisor] claude spawned pid=${this.term.pid} cwd=${config.workspace}`,
+    );
     this.nextBackoff = RESTART_BACKOFF_MS;
 
     // --dangerously-load-development-channels always shows a one-time
