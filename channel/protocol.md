@@ -45,7 +45,7 @@ The daemon is the parent of `claude`; `claude` is the parent of `outpost-channel
 5. **Socket close** — clear active downstream on the daemon side. Inbound messages buffer (max 16) until the next channel connects or are dropped.
 6. **Claude exit** — channel exits with it (stdio EOF). Daemon's process supervisor sees `claude` die and respawns.
 
-There is at most one channel connected at a time. Multi-claude routing is out of scope for v0.
+There is at most one **channel** connected at a time. Short-lived `system_inject` connections don't count as channels — they drop one message, get an ack, and disconnect without touching the channel binding. Multi-claude routing is out of scope for v0.
 
 ## Messages
 

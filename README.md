@@ -184,9 +184,9 @@ No `--resume`, no multi-session, no per-chat cwd. If you want a fresh context, `
 
 ## Intentionally not bundled
 
-- **`/new`, `/clear`, `/switch`** — one claude, one workspace, no session selector. Coming back when there's a real story for multi-session under one supervisor.
+- **`/new`, `/switch`** — one claude, one workspace, no session selector. Coming back when there's a real story for multi-session under one supervisor. (`/clear` exists — it kills + respawns claude for a fresh conversation.)
 - **Streaming partial replies** — the `reply` MCP tool is atomic by design ([protocol.md → Out of scope](channel/protocol.md#out-of-scope)). Claude replies once per turn, not incrementally. Faking it with multiple `reply` calls is on the "no" list.
-- **Permission relay** — Bash / Write approvals can't come from Telegram yet. Workaround: the supervisor pre-allowlists `Read`/`Write`/`Edit`/`Bash`/etc. in `.claude/settings.local.json`, so claude doesn't block on approval prompts at all. Not bypass mode — granular allow.
+- **Permission relay** — Bash / Write approvals can't come from Telegram yet. Workaround: the supervisor sets `permissions.defaultMode: "bypassPermissions"` in `.claude/settings.local.json` so claude doesn't block on approval prompts. The bot's `ALLOWED_USER_IDS` is the real auth boundary — only paired users can dispatch into claude in the first place.
 - **Discord / iMessage bridges** — outpost is Telegram-only. The channel protocol could host other transports; nobody's written them.
 - **Inbound persistence** — if the daemon is down when Telegram delivers a message, the message is lost. The daemon is supposed to be the most stable thing in the box; if it isn't, fix the daemon instead of adding a queue.
 
@@ -194,13 +194,14 @@ No `--resume`, no multi-session, no per-chat cwd. If you want a fresh context, `
 
 **PTY is required.** Claude detects non-TTY stdin/stdout and falls into `-p` (programmatic) mode — which is exactly what we're avoiding. `node-pty` gives it a real TTY.
 
-**Startup dialog seeding.** A fresh `claude` boot wants the human to dismiss five things before it'll talk: theme picker, login, folder-trust dialog, MCP discovery dialog, and (for the development-channels flag) a "this is experimental" warning. `supervisor.ts` handles each:
+**Startup dialog seeding.** A fresh `claude` boot wants the human to dismiss several dialogs before it'll talk. `supervisor.ts` handles each so the bot stays unattended:
 
 - Theme + login — must be done once by a human via interactive `claude` on the host.
 - Folder trust + MCP discovery — pre-set in `~/.claude.json` under `projects[<workspace>]`.
+- Bypass-mode warning — auto-dismissed by writing Down + Enter to the PTY (cursor sits on "No, exit" by default; option 2 is "Yes, I accept"). The two writes are separated by 200 ms so claude's raw-mode reader doesn't treat the leading `\x1b` as bare Esc → Cancel.
 - Dev-channels warning — detected in PTY output, dismissed by writing `\r` (cursor sits on "local development" by default).
 
-If `claude` ever changes any of these prompts, the supervisor will hang on boot. That's the cost of bypassing the dialogs without a CLI flag for it.
+If `claude` ever changes any of these prompts, the supervisor will hang on boot. Set `OUTPOST_PTY_LOG=1` and tail `logs/err.log` to see what claude is actually asking; that's the cost of bypassing the dialogs without a CLI flag for it.
 
 **Markdown → Telegram HTML.** Telegram's `parse_mode: "HTML"` is a small subset — no `<table>`, no nested formatting in many spots. `src/messages.ts` extracts fenced code blocks into placeholders, runs the markdown transforms (inline bold/italic/links, headings, GFM tables flattened into text "cards"), then restores code blocks last. On HTML send failure, falls back to plain text by stripping tags.
 
