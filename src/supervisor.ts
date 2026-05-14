@@ -31,6 +31,21 @@ export class Supervisor {
     }
   }
 
+  // Kill the current claude without setting `stopping` — onExit's backoff
+  // timer respawns a fresh session. Used by the bot's /clear handler.
+  restart(): void {
+    this.nextBackoff = RESTART_BACKOFF_MS;
+    if (!this.term) {
+      this.spawn();
+      return;
+    }
+    try {
+      this.term.kill();
+    } catch {
+      /* already dead */
+    }
+  }
+
   private async seedWorkspace(): Promise<void> {
     const ws = config.workspace;
     await mkdir(ws, { recursive: true });

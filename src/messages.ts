@@ -137,19 +137,14 @@ export function help(): string {
   return [
     `${b("outpost · commands")}`,
     "",
-    `${code("/start")}     boot banner`,
-    `${code("/help")}      this`,
-    `${code("/new <name> [--in <path>]")}`,
-    `             create a session; default cwd = $HOME so ~/CLAUDE.md drives the agent`,
-    `${code("/list")}      all sessions (* = active)`,
-    `${code("/resume [sid8]")}  resume / switch; no arg → picker`,
-    `${code("/clear")}     park current session`,
-    `${code("/delete [sid8|all]")}  delete one / all; no arg → picker`,
-    `${code("/cancel")}    interrupt running turn`,
-    `${code("/status")}    bot + active session info`,
-    `${code("/login")}     PTY-bridged claude OAuth (URL forwarded here)`,
+    `${code("/start")}    boot banner`,
+    `${code("/help")}     this`,
+    `${code("/status")}   daemon uptime`,
+    `${code("/clear")}    reset claude — kill + respawn, fresh conversation`,
     "",
-    i(`attachments: drop a photo/file → downloaded to active cwd, path passed to agent.`),
+    i("plain text → forwarded to claude as a turn."),
+    i("photos / docs → downloaded to workspace, path passed in caption."),
+    i("other /<cmd> (e.g. /plugin, /mcp) → forwarded to claude verbatim."),
   ].join("\n");
 }
 

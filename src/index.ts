@@ -105,6 +105,11 @@ bot.command("status", (ctx) =>
     }),
   ),
 );
+bot.command("clear", async (ctx) => {
+  if (ctx.chat) stopTyping(ctx.chat.id);
+  await reply(ctx, "session reset — fresh claude in a few seconds.");
+  supervisor.restart();
+});
 
 async function handleAttachment(
   ctx: Context,
@@ -181,7 +186,8 @@ bot.catch((err) => {
 await bot.api.setMyCommands([
   { command: "start", description: "boot banner" },
   { command: "help", description: "command list" },
-  { command: "status", description: "system status" },
+  { command: "status", description: "daemon uptime" },
+  { command: "clear", description: "reset claude — fresh conversation" },
 ]);
 
 let shuttingDown = false;
