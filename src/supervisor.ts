@@ -73,36 +73,14 @@ export class Supervisor {
       ),
     );
 
-    // Granular allowlist. The bypass-mode warning we can't reliably
-    // auto-dismiss, so we enumerate. mcp__outpost-channel__reply MUST
-    // be exact — when claude surfaces it via ToolSearch from the
-    // deferred-tools pool the wildcard `mcp__*` doesn't satisfy the
-    // permission check (verified empirically: bot hangs waiting on
-    // approval). Other MCP servers (`mcp__supabase__*`, etc.) get added
-    // here as they're needed.
+    // Bypass mode. Any tool just runs — single-user agent on a controlled
+    // VM, bot allowlist is the real auth boundary. The warning dialog
+    // that fires whenever bypass is on gets auto-dismissed below.
     await writeFile(
       `${ws}/.claude/settings.local.json`,
       JSON.stringify(
         {
-          permissions: {
-            allow: [
-              "Read",
-              "Write",
-              "Edit",
-              "Glob",
-              "Grep",
-              "Bash",
-              "BashOutput",
-              "KillShell",
-              "WebFetch",
-              "WebSearch",
-              "Task",
-              "TodoWrite",
-              "NotebookEdit",
-              "mcp__outpost-channel__reply",
-              "mcp__*",
-            ],
-          },
+          permissions: { defaultMode: "bypassPermissions" },
           enableAllProjectMcpServers: true,
         },
         null,
