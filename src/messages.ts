@@ -1,137 +1,37 @@
 /**
  * Framework messages for outpost.
  *
- * Style philosophy: gateway speaks like a retro terminal — plain English,
- * pure ASCII, no flourish. The "personality" of an agent comes from the
- * Claude Code side reading ~/CLAUDE.md, not from this layer.
+ * The bot speaks plain ASCII with minimal flourish — the agent's actual
+ * personality lives in ~/.claude/CLAUDE.md on the host and arrives via the
+ * channel. This file only does the framing for /start, /help, /status, and
+ * the markdown→Telegram-HTML transform for claude's replies.
  *
  * Markers:
- *   >>  action / tool invocation / switch target
- *   !!  warning / failure
- *   ->  redirect (used inline)
+ *   >>  action  · ok / completed
+ *   !!  warning · failure
  */
 
 import { config } from "./config.js";
 
-// ── HTML helpers ────────────────────────────────────────────────────
+// ── HTML helpers (internal) ─────────────────────────────────────────
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const code = (s: string): string => `<code>${esc(s)}</code>`;
 
-const codeBlock = (s: string, lang = ""): string =>
-  lang
-    ? `<pre><code class="language-${lang}">${esc(s)}</code></pre>`
-    : `<pre>${esc(s)}</pre>`;
-
 const b = (s: string): string => `<b>${s}</b>`;
 const i = (s: string): string => `<i>${s}</i>`;
 
-export const md = { esc, code, codeBlock, b, i };
-
-// ── boot ────────────────────────────────────────────────────────────
+// ── framework messages ──────────────────────────────────────────────
 
 export function startupBanner(): string {
   return `${b("outpost")} ${i("·")} ${esc(config.agentName)} ${i("·")} ready.`;
 }
 
-// ── session lifecycle ───────────────────────────────────────────────
-
-export function newSession(name: string, sid8: string, cwd: string): string {
-  return [
-    `${b(">> session created")} ${esc(name)} ${code(sid8)}`,
-    `   cwd ${code(cwd)}`,
-  ].join("\n");
-}
-
-export function parkedSession(name: string, sid8: string): string {
-  return `${b(">> parked")} ${esc(name)} ${code(sid8)} — /resume ${sid8} to bring back`;
-}
-
-export function deletedSession(name: string, sid8: string): string {
-  return `${b(">> deleted")} ${esc(name)} ${code(sid8)}`;
-}
-
-export function deletedAll(count: number): string {
-  if (count === 0) return `${b("!!")} nothing to delete`;
-  return `${b(">> deleted all")} ${count} session${count === 1 ? "" : "s"}`;
-}
-
-const fmtAgo = (ts: number): string => {
-  const sec = Math.floor((Date.now() - ts) / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
-  return `${Math.floor(sec / 86400)}d ago`;
-};
-
-export function listSessions(
-  rows: {
-    name: string;
-    sid8: string;
-    active: boolean;
-    turns: number;
-    lastActivityAt: number;
-  }[],
-): string {
-  if (rows.length === 0) return `${b("sessions")} (none)`;
-  const body = rows
-    .map(
-      (r) =>
-        `${r.active ? "*" : " "} ${code(r.sid8)}  ${esc(r.name)}  ${i(`${r.turns} turns · ${fmtAgo(r.lastActivityAt)}`)}`,
-    )
-    .join("\n");
-  return `${b("sessions")}\n${body}`;
-}
-
-export function switched(name: string): string {
-  return `${b(">>")} ${esc(name)}`;
-}
-
-// ── error / state ───────────────────────────────────────────────────
-
-export function noActive(): string {
-  return `${b("!!")} no active session — /new ${code("&lt;name&gt;")} to create, /list to see parked.`;
-}
-
-export function notFound(sid8: string): string {
-  return `${b("!!")} session ${code(sid8)} not found`;
-}
-
-export function ambiguous(prefix: string, count: number): string {
-  return `${b("!!")} prefix ${code(prefix)} matches ${count} sessions, narrow it`;
-}
-
 export function denied(): string {
   return `${b("!!")} auth required — you are not on the allow-list`;
 }
-
-export function busy(): string {
-  return `${b("!!")} previous turn still running — /cancel or wait`;
-}
-
-export function cancelled(): string {
-  return `${b(">> cancelled")}`;
-}
-
-export function nothingToCancel(): string {
-  return `${b("!!")} nothing to cancel`;
-}
-
-// ── pickers ─────────────────────────────────────────────────────────
-
-export function pickerPrompt(action: "resume" | "delete"): string {
-  if (action === "resume") return `pick a session to resume:`;
-  return `${b("!!")} pick a session to delete (irreversible):`;
-}
-
-export function pickerEmpty(action: "resume" | "delete"): string {
-  if (action === "resume") return `${b("!!")} nothing to resume — /new to create`;
-  return `${b("!!")} nothing to delete`;
-}
-
-// ── help / status ───────────────────────────────────────────────────
 
 export function help(): string {
   return [
@@ -139,7 +39,7 @@ export function help(): string {
     "",
     `${code("/start")}    boot banner`,
     `${code("/help")}     this`,
-    `${code("/status")}   daemon uptime`,
+    `${code("/status")}   daemon uptime + claude state`,
     `${code("/clear")}    reset claude — kill + respawn, fresh conversation`,
     "",
     i("plain text → forwarded to claude as a turn."),
@@ -164,107 +64,16 @@ export function status(opts: {
   ].join("\n");
 }
 
-// ── tool stream ─────────────────────────────────────────────────────
-
-export function toolCall(toolName: string, input: unknown): string {
-  switch (toolName) {
-    case "Bash": {
-      const cmd = (input as { command?: string }).command ?? "";
-      return `${b(">> Bash")}\n${codeBlock(cmd, "bash")}`;
-    }
-    case "Read": {
-      const p = (input as { file_path?: string }).file_path ?? "";
-      return `${b(">> Read")} ${code(p)}`;
-    }
-    case "Edit":
-    case "Write":
-    case "MultiEdit": {
-      const p =
-        (input as { file_path?: string }).file_path ??
-        (input as { path?: string }).path ??
-        "";
-      return `${b(`>> ${toolName}`)} ${code(p)}`;
-    }
-    case "Glob": {
-      const pat = (input as { pattern?: string }).pattern ?? "";
-      return `${b(">> Glob")} ${code(pat)}`;
-    }
-    case "Grep": {
-      const pat = (input as { pattern?: string }).pattern ?? "";
-      return `${b(">> Grep")} ${code(pat)}`;
-    }
-    case "WebFetch":
-    case "WebSearch": {
-      const q =
-        (input as { url?: string }).url ??
-        (input as { query?: string }).query ??
-        "";
-      return `${b(`>> ${toolName}`)} ${code(q)}`;
-    }
-    case "TodoWrite":
-      return `${b(">> TodoWrite")}`;
-    case "Task":
-      return `${b(">> Task")} ${i("sub-agent dispatched")}`;
-    default:
-      return `${b(`>> ${esc(toolName)}`)}`;
-  }
-}
-
 export function toolFail(error: string): string {
   return `${b("!!")} ${esc(error.slice(0, 500))}`;
-}
-
-export function finalAnswer(text: string): string {
-  return mdToHtml(text);
 }
 
 export function attachmentReceived(filename: string, savedPath: string): string {
   return `${b(">> attached")} ${code(filename)} -> ${code(savedPath)}`;
 }
 
-export function turnComplete(opts: {
-  inputTokens: number;
-  outputTokens: number;
-  durationMs: number;
-}): string {
-  const sec = (opts.durationMs / 1000).toFixed(1);
-  return `${i(`done · ${sec}s · ${opts.inputTokens} in · ${opts.outputTokens} out`)}`;
-}
-
-// ── login flow (PTY OAuth) ──────────────────────────────────────────
-
-export function loginBegin(): string {
-  return `${i("starting PTY-bridged claude /login (max 5 min)…")}`;
-}
-
-export function loginUrl(url: string): string {
-  return [
-    `${b(">> auth url")}`,
-    `<a href="${esc(url)}">${esc(url)}</a>`,
-    "",
-    i(`open the link to complete auth; success will be detected automatically.`),
-  ].join("\n");
-}
-
-export function loginOk(tail: string): string {
-  const block = tail.trim() ? `\n${codeBlock(tail.slice(-400))}` : "";
-  return `${b(">> login ok")}${block}`;
-}
-
-export function loginFail(error: string, tail: string): string {
-  const block = tail.trim() ? `\n${codeBlock(tail.slice(-400))}` : "";
-  return `${b("!!")} login failed: ${esc(error.slice(0, 200))}${block}`;
-}
-
-export function loginCodePrompt(): string {
-  return [
-    `paste the authorization code here as the next message;`,
-    `I'll forward it to the claude REPL.`,
-  ].join("\n");
-}
-
-export function loginCodeReceived(): string {
-  return `${i("code received, submitting…")}`;
+export function finalAnswer(text: string): string {
+  return mdToHtml(text);
 }
 
 // ── markdown → telegram HTML ────────────────────────────────────────
