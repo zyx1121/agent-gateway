@@ -73,27 +73,14 @@ export class Supervisor {
       ),
     );
 
-    // Pre-allow the tools claude commonly reaches for + the reply tool.
-    // Skipping defaultMode:bypassPermissions on purpose — it triggers a
-    // warning dialog that can't be pre-dismissed. Granular allowlist is
-    // both safer and quieter.
+    // Bypass mode so any tool (including newly-loaded MCP servers we
+    // didn't pre-allowlist) just runs. The warning dialog this triggers
+    // is dismissed in onData below via PTY arrow+enter.
     await writeFile(
       `${ws}/.claude/settings.local.json`,
       JSON.stringify(
         {
-          permissions: {
-            allow: [
-              "Read",
-              "Write",
-              "Edit",
-              "Glob",
-              "Grep",
-              "Bash",
-              "WebFetch",
-              "WebSearch",
-              "mcp__outpost-channel__reply",
-            ],
-          },
+          permissions: { defaultMode: "bypassPermissions" },
           enableAllProjectMcpServers: true,
         },
         null,
@@ -168,35 +155,46 @@ export class Supervisor {
     console.log(`[supervisor] claude spawned pid=${this.term.pid}`);
     this.nextBackoff = RESTART_BACKOFF_MS;
 
-    // --dangerously-load-development-channels always shows a one-time
-    // warning. Default cursor sits on option 1 ("local development"), so
-    // a single Enter clears it. Buffer chunks because ANSI escapes splice
-    // words and a marker can straddle chunk boundaries.
-    //
-    // Raw PTY output is only mirrored to stderr when OUTPOST_PTY_LOG is set
-    // — otherwise the daemon's own structured logs are enough and the noise
-    // wrecks pm2 err.log.
+    // Two startup dialogs fire after bypass mode + dev-channels are on:
+    //   1. Bypass-mode warning — default cursor on option 1 ("No, exit"),
+    //      so we Down+Enter to pick option 2 ("Yes, I accept").
+    //   2. Dev-channels warning — default cursor on option 1 ("local
+    //      development"), so a single Enter clears it.
+    // Buffer chunks because ANSI escapes splice words and markers can
+    // straddle chunk boundaries. PTY output is only mirrored to stderr when
+    // OUTPOST_PTY_LOG is set; otherwise pm2 err.log stays readable.
     const ptyLog = !!process.env.OUTPOST_PTY_LOG;
     let outputBuffer = "";
+    let bypassDismissed = false;
     let devChannelsDismissed = false;
+    const sendSeq = (seq: string, label: string): void => {
+      console.log(`[supervisor] ${label} warning detected, dismissing`);
+      let tries = 0;
+      const tick = (): void => {
+        if (tries >= 3 || !this.term) return;
+        tries++;
+        this.term.write(seq);
+        setTimeout(tick, 800);
+      };
+      setTimeout(tick, 1500);
+    };
     this.term.onData((chunk) => {
       if (ptyLog) process.stderr.write(chunk);
       outputBuffer += chunk;
       if (outputBuffer.length > 8192) outputBuffer = outputBuffer.slice(-4096);
       if (
+        !bypassDismissed &&
+        outputBuffer.includes("code.claude.com/docs/en/security")
+      ) {
+        bypassDismissed = true;
+        sendSeq("\x1b[B\r", "bypass-mode"); // Down + Enter → option 2
+      }
+      if (
         !devChannelsDismissed &&
         outputBuffer.includes("dangerously-load-development-channels")
       ) {
         devChannelsDismissed = true;
-        console.log("[supervisor] dev-channels warning detected, dismissing");
-        let tries = 0;
-        const tick = (): void => {
-          if (tries >= 3 || !this.term) return;
-          tries++;
-          this.term.write("\r");
-          setTimeout(tick, 800);
-        };
-        setTimeout(tick, 1500);
+        sendSeq("\r", "dev-channels"); // Enter on default option 1
       }
     });
 
