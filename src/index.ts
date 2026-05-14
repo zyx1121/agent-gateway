@@ -20,6 +20,24 @@ const decodeChatId = (raw: string): number | null => {
 const encodeChatId = (chatId: number): string => `tg:${chatId}`;
 
 const supervisor = new Supervisor();
+
+// Telegram typing indicator auto-expires after ~5s. Refresh on a 4s tick
+// while claude is working, clear when the reply lands.
+const typingTimers = new Map<number, NodeJS.Timeout>();
+function startTyping(chatId: number): void {
+  if (typingTimers.has(chatId)) return;
+  const ping = (): void => {
+    void bot.api.sendChatAction(chatId, "typing").catch(() => {});
+  };
+  ping();
+  typingTimers.set(chatId, setInterval(ping, 4_000));
+}
+function stopTyping(chatId: number): void {
+  const t = typingTimers.get(chatId);
+  if (t) clearInterval(t);
+  typingTimers.delete(chatId);
+}
+
 const sock = new DaemonSocket(config.socketPath, {
   onHello: (hello) => {
     console.log(
@@ -30,6 +48,7 @@ const sock = new DaemonSocket(config.socketPath, {
   onReply: async (reply) => {
     const chatId = decodeChatId(reply.chat_id);
     if (chatId === null) return { ok: false, error: `unparseable chat_id ${reply.chat_id}` };
+    stopTyping(chatId);
     try {
       await sendReply(chatId, reply.text);
       return { ok: true };
@@ -112,12 +131,16 @@ function dispatch(ctx: Context, content: string): void {
   const chat = ctx.chat;
   const from = ctx.from;
   if (!chat || !from) return;
+  startTyping(chat.id);
   const result = dispatchInbound(sock, content, {
     chat_id: encodeChatId(chat.id),
     user: from.username ?? String(from.id),
     ts: new Date().toISOString(),
   });
-  if (!result.ok) void reply(ctx, msg.toolFail(result.error ?? "dispatch failed"));
+  if (!result.ok) {
+    stopTyping(chat.id);
+    void reply(ctx, msg.toolFail(result.error ?? "dispatch failed"));
+  }
 }
 
 bot.on("message:photo", async (ctx) => {
@@ -140,8 +163,11 @@ bot.on("message:document", async (ctx) => {
   if (path) dispatch(ctx, `${caption}\n\nfile path: ${path}`);
 });
 
+// Registered bot.command() handlers above already consume /start, /help,
+// /status. Anything else starting with `/` (like Claude Code's own slash
+// commands — /plugin, /mcp, /skills, /init…) falls through here and gets
+// dispatched to claude verbatim.
 bot.on("message:text", (ctx) => {
-  if (ctx.message.text.startsWith("/")) return;
   dispatch(ctx, ctx.message.text);
 });
 
