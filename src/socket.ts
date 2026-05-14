@@ -85,14 +85,13 @@ export class DaemonSocket {
   }
 
   private onConnect(sock: Socket): void {
-    if (this.active) {
-      console.warn("[socket] new channel connected, dropping previous");
-      this.active.destroy();
-    }
-    this.active = sock;
-
+    // Don't claim the active slot yet. We don't know whether this is a
+    // channel (long-lived, becomes `active`) or a system_inject (one-shot,
+    // must leave the existing channel intact). Wait until we've read the
+    // first message and seen `hello`.
     let buf = "";
     let helloSeen = false;
+    let isChannel = false;
 
     sock.on("data", (chunk: Buffer) => {
       buf += chunk.toString("utf8");
@@ -119,11 +118,10 @@ export class DaemonSocket {
         }
         if (!helloSeen) {
           if (msg.type === "system_inject") {
-            // One-shot inject: external CLI (e.g. cron) drops a synthetic
-            // inbound for the active channel, gets an ack, socket closes.
-            // No hello / no channel registration — daemon stays bound to its
-            // existing channel.
-            void this.handleInject(sock, msg as SystemInject);
+            // One-shot inject: drops a synthetic inbound for the active
+            // channel, gets an ack, socket closes. Does NOT register as a
+            // channel, so the existing claude binding stays put.
+            this.handleInject(sock, msg as SystemInject);
             return;
           }
           if (msg.type !== "hello") {
@@ -136,6 +134,13 @@ export class DaemonSocket {
             sock.destroy();
             return;
           }
+          // hello validated — now claim the active slot.
+          if (this.active && this.active !== sock) {
+            console.warn("[socket] new channel connected, dropping previous");
+            this.active.destroy();
+          }
+          this.active = sock;
+          isChannel = true;
           helloSeen = true;
           this.handlers.onHello?.(msg as Hello);
           this.flushBuffered();
@@ -150,7 +155,7 @@ export class DaemonSocket {
     });
 
     const onEnd = (): void => {
-      if (this.active === sock) {
+      if (isChannel && this.active === sock) {
         this.active = null;
         this.handlers.onDisconnect?.();
       }
