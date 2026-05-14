@@ -19,6 +19,11 @@ export class Supervisor {
     this.spawn();
   }
 
+  /** Current claude pid, or null if no claude is running. */
+  pid(): number | null {
+    return this.term?.pid ?? null;
+  }
+
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.term) {

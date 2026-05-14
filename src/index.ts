@@ -1,5 +1,5 @@
 import { Bot, Context, GrammyError, HttpError } from "grammy";
-import { writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "./config.js";
 import * as msg from "./messages.js";
@@ -9,6 +9,18 @@ import { Supervisor } from "./supervisor.js";
 
 const BOOT_AT = Date.now();
 const bot = new Bot(config.botToken);
+let msgsIn = 0;
+let msgsOut = 0;
+
+async function readClaudeRssBytes(pid: number): Promise<number | null> {
+  try {
+    const text = await readFile(`/proc/${pid}/status`, "utf8");
+    const m = /^VmRSS:\s+(\d+)\s+kB/m.exec(text);
+    return m ? Number(m[1]) * 1024 : null;
+  } catch {
+    return null;
+  }
+}
 
 // chat_id (as it travels through the channel protocol) is the string
 // "tg:<telegram_chat_id>". The number is what grammY's sendMessage needs.
@@ -22,19 +34,39 @@ const encodeChatId = (chatId: number): string => `tg:${chatId}`;
 const supervisor = new Supervisor();
 
 // Telegram typing indicator auto-expires after ~5s. Refresh on a 4s tick
-// while claude is working, clear when the reply lands.
-const typingTimers = new Map<number, NodeJS.Timeout>();
+// while claude is working, clear when the reply lands. Hard cap at 10 min
+// — if claude hasn't replied by then it's almost certainly stuck, so we
+// stop pinging and tell the user to /clear.
+const TYPING_REFRESH_MS = 4_000;
+const TYPING_MAX_MS = 10 * 60_000;
+const typingTimers = new Map<
+  number,
+  { interval: NodeJS.Timeout; safety: NodeJS.Timeout }
+>();
 function startTyping(chatId: number): void {
   if (typingTimers.has(chatId)) return;
   const ping = (): void => {
     void bot.api.sendChatAction(chatId, "typing").catch(() => {});
   };
   ping();
-  typingTimers.set(chatId, setInterval(ping, 4_000));
+  const interval = setInterval(ping, TYPING_REFRESH_MS);
+  const safety = setTimeout(() => {
+    stopTyping(chatId);
+    void bot.api
+      .sendMessage(
+        chatId,
+        "claude 沒回應 10 分鐘，大概卡住了。送 /clear 重啟試試。",
+      )
+      .catch(() => {});
+  }, TYPING_MAX_MS);
+  typingTimers.set(chatId, { interval, safety });
 }
 function stopTyping(chatId: number): void {
   const t = typingTimers.get(chatId);
-  if (t) clearInterval(t);
+  if (t) {
+    clearInterval(t.interval);
+    clearTimeout(t.safety);
+  }
   typingTimers.delete(chatId);
 }
 
@@ -58,6 +90,7 @@ const sock = new DaemonSocket(config.socketPath, {
     stopTyping(chatId);
     try {
       await sendReply(chatId, reply.text);
+      msgsOut++;
       return { ok: true };
     } catch (err: any) {
       const desc = String(err?.description ?? err?.message ?? err);
@@ -100,18 +133,20 @@ async function reply(ctx: Context, text: string): Promise<void> {
 
 bot.command("start", (ctx) => reply(ctx, msg.startupBanner()));
 bot.command("help", (ctx) => reply(ctx, msg.help()));
-bot.command("status", (ctx) =>
-  reply(
+bot.command("status", async (ctx) => {
+  const pid = supervisor.pid();
+  const rss = pid ? await readClaudeRssBytes(pid) : null;
+  await reply(
     ctx,
     msg.status({
       uptimeSec: Math.floor((Date.now() - BOOT_AT) / 1000),
-      activeName: null,
-      activeSid8: null,
-      totalSessions: 0,
-      busy: false,
+      claudePid: pid,
+      claudeRssBytes: rss,
+      msgsIn,
+      msgsOut,
     }),
-  ),
-);
+  );
+});
 bot.command("clear", async (ctx) => {
   if (ctx.chat) stopTyping(ctx.chat.id);
   await reply(ctx, "session reset — fresh claude in a few seconds.");
@@ -146,6 +181,7 @@ function dispatch(ctx: Context, content: string): void {
   console.log(
     `[inbound] tg:${chat.id} ${from.username ?? from.id} ${content.length}c: ${preview(content)}`,
   );
+  msgsIn++;
   startTyping(chat.id);
   const result = dispatchInbound(sock, content, {
     chat_id: encodeChatId(chat.id),

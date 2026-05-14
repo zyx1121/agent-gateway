@@ -50,17 +50,22 @@ export function help(): string {
 
 export function status(opts: {
   uptimeSec: number;
-  activeName: string | null;
-  activeSid8: string | null;
-  totalSessions: number;
-  busy: boolean;
+  claudePid: number | null;
+  claudeRssBytes: number | null;
+  msgsIn: number;
+  msgsOut: number;
 }): string {
+  const mins = Math.floor(opts.uptimeSec / 60);
+  const secs = opts.uptimeSec % 60;
+  const rss = opts.claudeRssBytes
+    ? ` · ${(opts.claudeRssBytes / 1024 / 1024).toFixed(0)} MB`
+    : "";
+  const claude = opts.claudePid ? `pid ${opts.claudePid}${rss}` : "down";
   return [
     `${b("status")}`,
-    `   uptime    ${Math.floor(opts.uptimeSec / 60)}m ${opts.uptimeSec % 60}s`,
-    `   sessions  ${opts.totalSessions}`,
-    `   active    ${opts.activeName ? `${esc(opts.activeName)} (${opts.activeSid8})` : "—"}`,
-    `   busy      ${opts.busy ? "yes" : "no"}`,
+    `   uptime    ${mins}m ${secs}s`,
+    `   claude    ${claude}`,
+    `   msgs      ${opts.msgsIn} in · ${opts.msgsOut} out`,
   ].join("\n");
 }
 
