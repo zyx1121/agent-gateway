@@ -112,16 +112,15 @@ EOF
 chmod 600 .env
 ```
 
-**4. Seed the workspace's `CLAUDE.md`** — this is what the agent reads on every turn. Default workspace is `$HOME/outpost-data`.
+**4. Seed `~/.claude/CLAUDE.md`** with the agent's personality. This is the user-level file Claude Code always loads, regardless of cwd — exactly what you want when the whole VM is one bot's home. Workspace-level `~/outpost-data/CLAUDE.md` also works, but only matters if you want different personas in different directories under the same user.
 
 ```bash
-WS="${CLAUDE_WORKSPACE:-$HOME/outpost-data}"
-mkdir -p "$WS"
-[ -f "$WS/CLAUDE.md" ] || cat > "$WS/CLAUDE.md" <<'EOF'
+mkdir -p ~/.claude
+[ -f ~/.claude/CLAUDE.md ] || cat > ~/.claude/CLAUDE.md <<'EOF'
 # Agent
 
 Replace this with the agent's personality, responsibilities, and any project pointers.
-Claude reads this on every turn — edits take effect immediately, no redeploy.
+Claude reads this on every turn — edits take effect on the next claude spawn (pm2 restart outpost).
 EOF
 ```
 
@@ -138,7 +137,7 @@ pm2 logs outpost --lines 80 --nostream    # confirm `claude spawned` and `@<bot>
 **6. Report to the human:**
 - pm2 status for the `outpost` process
 - Bot @username (from the `[boot] @<name> ready.` line)
-- Whether workspace `CLAUDE.md` was pre-existing or newly seeded
+- Whether `~/.claude/CLAUDE.md` was pre-existing or newly seeded
 - Any auth issues (claude not logged in, socket permission, etc.)
 
 ## Environment
@@ -150,7 +149,7 @@ pm2 logs outpost --lines 80 --nostream    # confirm `claude spawned` and `@<bot>
 | `AGENT_NAME` | no | `agent` | Display name in `/start` banner and boot logs |
 | `CLAUDE_BIN` | no | `claude` | Path to the `claude` binary (prefer absolute) |
 | `OUTPOST_SOCK` | no | `/run/outpost.sock`, falls back to `$HOME/outpost.sock` | Unix socket the channel connects to |
-| `CLAUDE_WORKSPACE` | no | `$HOME/outpost-data` | Where the daemon seeds `.mcp.json`, `.claude/settings.local.json`, and where you place `CLAUDE.md` |
+| `CLAUDE_WORKSPACE` | no | `$HOME/outpost-data` | Where the daemon seeds `.mcp.json` and `.claude/settings.local.json`. Project-level `CLAUDE.md` may also live here, but the typical persona lives at `~/.claude/CLAUDE.md` (user-level, always loaded) |
 | `OUTPOST_PTY_LOG` | no | unset | If set, mirror claude's raw PTY output to stderr. Off by default — pm2 err.log stays readable |
 
 `SESSIONS_FILE`, `IDLE_TIMEOUT`, `HARD_TIMEOUT` are gone — there's one long-running claude now; there's nothing to time out or persist.
