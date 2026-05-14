@@ -1,6 +1,6 @@
 {
   "name": "outpost",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Run Claude Code as a daemon on a server you don't sit in front of. Talk to it from your phone.",
   "type": "module",
   "repository": {
