@@ -157,35 +157,47 @@ export class Supervisor {
     );
     this.nextBackoff = RESTART_BACKOFF_MS;
 
-    // --dangerously-load-development-channels always shows a one-time
-    // warning. Default cursor sits on option 1 ("local development"), so
-    // a single Enter clears it. Buffer chunks because ANSI escapes splice
-    // words and a marker can straddle chunk boundaries.
+    // Two startup dialogs need auto-dismissal:
     //
-    // Raw PTY output is only mirrored to stderr when OUTPOST_PTY_LOG is set
-    // — otherwise the daemon's own structured logs are enough and the noise
-    // wrecks pm2 err.log.
+    //   1. Bypass-Permissions warning  — ❯1. No, exit / 2. Yes, I accept
+    //      Default cursor on "No, exit". Send Down arrow, wait, then Enter.
+    //      Splitting the two writes matters: `\x1b[B\r` in one buffer let
+    //      claude's raw-mode reader treat the leading `\x1b` as bare Esc
+    //      (= Cancel), which selects "No, exit" and exits → crash loop.
+    //
+    //   2. Dev-channels warning  — ❯1. I am using this for local development
+    //      / 2. Exit. Default cursor on the accept option, single Enter clears.
+    //
+    // Markers chosen for chunk-boundary safety — claude's renderer splices
+    // ANSI escapes between every word, but the contiguous URL and the
+    // hyphenated flag name survive intact. PTY output is mirrored to stderr
+    // only when OUTPOST_PTY_LOG=1 (off in prod to keep pm2 err.log clean).
     const ptyLog = !!process.env.OUTPOST_PTY_LOG;
     let outputBuffer = "";
+    let bypassDismissed = false;
     let devChannelsDismissed = false;
     this.term.onData((chunk) => {
       if (ptyLog) process.stderr.write(chunk);
       outputBuffer += chunk;
       if (outputBuffer.length > 8192) outputBuffer = outputBuffer.slice(-4096);
       if (
+        !bypassDismissed &&
+        outputBuffer.includes("code.claude.com/docs/en/security")
+      ) {
+        bypassDismissed = true;
+        console.log("[supervisor] bypass-mode warning detected, dismissing");
+        setTimeout(() => {
+          this.term?.write("\x1b[B"); // Down → option 2
+          setTimeout(() => this.term?.write("\r"), 200); // confirm
+        }, 1500);
+      }
+      if (
         !devChannelsDismissed &&
         outputBuffer.includes("dangerously-load-development-channels")
       ) {
         devChannelsDismissed = true;
         console.log("[supervisor] dev-channels warning detected, dismissing");
-        let tries = 0;
-        const tick = (): void => {
-          if (tries >= 3 || !this.term) return;
-          tries++;
-          this.term.write("\r");
-          setTimeout(tick, 800);
-        };
-        setTimeout(tick, 1500);
+        setTimeout(() => this.term?.write("\r"), 1500);
       }
     });
 
