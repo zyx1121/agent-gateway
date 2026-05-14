@@ -78,8 +78,13 @@ const mcp = new Server(
   { name: "outpost-channel", version: VERSION },
   {
     capabilities: { experimental: { "claude/channel": {} }, tools: {} },
-    instructions:
-      'Inbound messages arrive as <channel source="outpost-channel" chat_id="...">. Reply with the reply tool, passing the same chat_id from the tag back.',
+    instructions: [
+      'Inbound messages arrive as <channel source="outpost-channel" chat_id="...">.',
+      "",
+      "The user is on a remote chat client. They cannot see your terminal output, your reasoning, your tool calls, or any free-form text you write. The ONLY thing they see is what you send through the `reply` MCP tool. A turn that ends without a `reply` call is invisible — they get silence, no matter how much you wrote.",
+      "",
+      "Therefore: every inbound from this channel must end with a `reply` tool call carrying the same `chat_id` from the inbound tag. If you need to think out loud, fine, but the conclusion goes in `reply`. Long answer? Put the long answer in `reply.text`. Quick acknowledgement? Still call `reply`. No-op turn? Call `reply` with a short status. Never end a turn from this channel with only free text — the user will think you ignored them.",
+    ].join("\n"),
   },
 );
 
