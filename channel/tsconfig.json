@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../dist/channel",
+    "noEmit": true
+  },
+  "include": ["channel.ts"]
+}

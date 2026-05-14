@@ -1,0 +1,13 @@
+{
+  "name": "outpost-channel",
+  "version": "0.1.0",
+  "description": "Claude Code channel plugin — bridges claude --channels to the outpost daemon over a unix socket.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "outpost-channel": "./channel.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}

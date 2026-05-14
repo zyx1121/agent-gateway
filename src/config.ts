@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { accessSync, constants } from "node:fs";
 
 const required = (name: string): string => {
   const v = process.env[name];
@@ -18,25 +19,15 @@ const csvIds = (name: string): Set<number> => {
   );
 };
 
-// Accepts plain ms or "5m" / "30s" / "1h" / "90m" suffixed shorthand.
-// Falls back if env is unset, empty, or unparsable so the bot still boots
-// instead of crashing on a typo'd .env line.
-const durationMs = (name: string, fallbackMs: number): number => {
-  const raw = (process.env[name] ?? "").trim();
-  if (!raw) return fallbackMs;
-  const m = /^(\d+)\s*(ms|s|m|h)?$/.exec(raw);
-  if (!m) {
-    console.warn(`[warn] ${name}="${raw}" is unparsable, using ${fallbackMs}ms`);
-    return fallbackMs;
-  }
-  const n = Number(m[1]);
-  switch (m[2]) {
-    case "h": return n * 3_600_000;
-    case "m": return n * 60_000;
-    case "s": return n * 1_000;
-    case "ms":
-    case undefined: return n;
-    default: return fallbackMs;
+// /run is the obvious place for a system socket but isn't always writable
+// (user-mode daemons, macOS dev boxes). Fall back to $HOME so the daemon
+// still boots; in prod set OUTPOST_SOCK explicitly to wherever fits.
+const defaultSocketPath = (): string => {
+  try {
+    accessSync("/run", constants.W_OK);
+    return "/run/outpost.sock";
+  } catch {
+    return `${process.env.HOME ?? "/tmp"}/outpost.sock`;
   }
 };
 
@@ -45,15 +36,8 @@ export const config = {
   allowedUsers: csvIds("ALLOWED_USER_IDS"),
   agentName: process.env.AGENT_NAME ?? "agent",
   claudeBin: process.env.CLAUDE_BIN ?? "claude",
-  sessionsFile:
-    process.env.SESSIONS_FILE ??
-    `${process.env.HOME}/outpost/sessions.json`,
-  // Idle timeout — kill if no stdout event for this long.
-  // Long-running turns that keep streaming tool calls stay alive; only
-  // genuinely stuck agents get reaped.
-  idleTimeoutMs: durationMs("IDLE_TIMEOUT", 5 * 60_000),
-  // Hard wall-clock cap as a circuit breaker.
-  hardTimeoutMs: durationMs("HARD_TIMEOUT", 30 * 60_000),
+  socketPath: process.env.OUTPOST_SOCK ?? defaultSocketPath(),
+  workspace: process.env.CLAUDE_WORKSPACE ?? `${process.env.HOME}/outpost-data`,
 };
 
 if (config.allowedUsers.size === 0) {
