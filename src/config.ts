@@ -1,12 +1,6 @@
 import "dotenv/config";
 import { accessSync, constants } from "node:fs";
 
-const required = (name: string): string => {
-  const v = process.env[name];
-  if (!v) throw new Error(`missing env: ${name}`);
-  return v;
-};
-
 const csvIds = (name: string): Set<number> => {
   const raw = process.env[name] ?? "";
   return new Set(
@@ -31,17 +25,16 @@ const defaultSocketPath = (): string => {
   }
 };
 
+// No throws at module-load time. Required fields default to empty/zero;
+// the daemon's boot path validates them and exits cleanly with a clear
+// message. Keeping this side-effect-free means subcommands that don't
+// need the daemon (e.g. `outpost inject`) can import config-adjacent
+// modules without crashing on a missing TELEGRAM_BOT_TOKEN.
 export const config = {
-  botToken: required("TELEGRAM_BOT_TOKEN"),
+  botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
   allowedUsers: csvIds("ALLOWED_USER_IDS"),
   agentName: process.env.AGENT_NAME ?? "agent",
   claudeBin: process.env.CLAUDE_BIN ?? "claude",
   socketPath: process.env.OUTPOST_SOCK ?? defaultSocketPath(),
   workspace: process.env.CLAUDE_WORKSPACE ?? `${process.env.HOME}/outpost-data`,
 };
-
-if (config.allowedUsers.size === 0) {
-  console.warn(
-    "[warn] ALLOWED_USER_IDS is empty — bot will reject every user.",
-  );
-}

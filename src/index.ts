@@ -7,6 +7,17 @@ import { dispatchInbound } from "./runner.js";
 import { DaemonSocket } from "./socket.js";
 import { Supervisor } from "./supervisor.js";
 
+// Boot-time config validation. config.ts is side-effect-free so subcommands
+// like `outpost inject` can run without these env vars; daemon mode demands
+// them. Bail out clean instead of crashing into pm2's restart loop.
+function fatal(reason: string): never {
+  console.error(`[fatal] ${reason}`);
+  process.exit(1);
+}
+if (!config.botToken) fatal("TELEGRAM_BOT_TOKEN missing — set it in .env or env");
+if (config.allowedUsers.size === 0)
+  fatal("ALLOWED_USER_IDS is empty — bot would reject every user");
+
 const BOOT_AT = Date.now();
 const bot = new Bot(config.botToken);
 let msgsIn = 0;
